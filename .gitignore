@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.exe
+*.log
+.DS_Store
+Thumbs.db
+test-results/
+coverage/
+.cache/
+*.download
+*.part
+npm-debug.log*
+.github_token
+src.zip
+

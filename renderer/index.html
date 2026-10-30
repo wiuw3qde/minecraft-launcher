@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:" />
+  <title>MC 启动器</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ============ 自定义标题栏 ============ -->
+  <div class="titlebar" id="titlebar">
+      <div class="tb-left">
+      <img class="tb-icon" src="../assets/icon-512.png" alt="" />
+      <span class="tb-title" id="tbTitle">MC 启动器</span>
+    </div>
+    <div class="tb-right">
+      <button class="tb-btn" id="winMin" title="最小化">
+        <svg viewBox="0 0 12 12"><path d="M1 6h10" /></svg>
+      </button>
+      <button class="tb-btn" id="winMax" title="最大化 / 还原">
+        <svg viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" rx="1" /></svg>
+      </button>
+      <button class="tb-btn tb-close" id="winClose" title="关闭">
+        <svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8" /></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="shell">
+    <!-- ============ 侧边栏 ============ -->
+    <aside class="sidebar">
+      <div class="brand">
+        <img class="brand-icon" src="../assets/icon-512.png" alt="" />
+        <div class="brand-text">
+          <h1 id="brandTitle">MC 启动器</h1>
+          <p id="envInfo" class="sub">加载中…</p>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button id="tabBtnLaunch" class="nav-item active">
+          <svg class="nav-ico" viewBox="0 0 24 24"><path d="M7 4h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm3 5v8m4-8v8" /></svg>
+          <span>启动游戏</span>
+        </button>
+        <button id="tabBtnDownload" class="nav-item">
+          <svg class="nav-ico" viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16" /></svg>
+          <span>下载版本</span>
+        </button>
+        <button id="tabBtnMods" class="nav-item">
+          <svg class="nav-ico" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" /><circle cx="18.5" cy="17" r="2.5" /></svg>
+          <span>模组下载</span>
+        </button>
+        <button id="tabBtnVersions" class="nav-item">
+          <svg class="nav-ico" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4-9-4zm0 5l9 4 9-4M3 17l9 4 9-4" /></svg>
+          <span>版本管理</span>
+        </button>
+        <button id="tabBtnMaps" class="nav-item">
+          <svg class="nav-ico" viewBox="0 0 24 24"><path d="M9 3L3 5v16l6-2 6 2 6-2V3l-6 2-6-2zm0 0v16m6-14v16" /></svg>
+          <span>下载地图</span>
+        </button>
+        <button id="tabBtnShaders" class="nav-item">
+          <svg class="nav-ico" viewBox="0 0 24 24"><path d="M12 3a9 9 0 109 9 9 9 0 00-9-9zm0 0v18m-9-9h18" /></svg>
+          <span>下载光影</span>
+        </button>
+        <button id="tabBtnResourcepacks" class="nav-item">
+          <svg class="nav-ico" viewBox="0 0 24 24"><path d="M4 7a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V7zm3 3h10M7 13h10" /></svg>
+          <span>下载资源包</span>
+        </button>
+        <button id="tabBtnTools" class="nav-item">
+          <svg class="nav-ico" viewBox="0 0 24 24"><path d="M14 7a4 4 0 11-4 4 4 4 0 014-4zm-9 9l3-3 2 2-3 3zm12-8l-3 3-2-2 3-3" /></svg>
+          <span>工具箱</span>
+        </button>
+        <button id="tabBtnMultiplayer" class="nav-item">
+          <svg class="nav-ico" viewBox="0 0 24 24"><path d="M12 3L3 8v8l9 5 9-5V8l-9-5zm0 2.3L19 8v8l-7 3.9L5 16V8l7-3.7zM8.5 10a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm7 0a1.5 1.5 0 110 3 1.5 1.5 0 010-3zM12 12.4a1.5 1.5 0 110 3 1.5 1.5 0 010-3z" /></svg>
+          <span>联机</span>
+        </button>
+        <button id="tabBtnSettings" class="nav-item">
+          <svg class="nav-ico" viewBox="0 0 24 24"><path d="M12 8a4 4 0 100 8 4 4 0 000-8zm9 4l2-1-2-3-2 1-2-2-1-2h-4l-1 2-2 2-2-1-2 3 2 1v0a7 7 0 000 4l-2 1 2 3 2-1 2 2 1 2h4l1-2 2-2 2 1 2-3-2-1a7 7 0 000-4z" /></svg>
+          <span>设置</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="foot-card">
+          <p class="foot-title">新手上路</p>
+          <ol class="foot-steps">
+            <li><i>1</i>选择游戏目录</li>
+            <li><i>2</i>选择游戏版本</li>
+            <li><i>3</i>登录（可离线）</li>
+            <li><i>4</i>点「启动游戏」</li>
+          </ol>
+          <p class="foot-hint">还没有游戏？去「下载版本」装一个，原版 / Fabric / Forge / OptiFine 全自动安装。</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ 主内容区 ============ -->
+    <main class="content">
+      <!-- ============ 启动页 ============ -->
+      <div id="tabLaunch">
+        <!-- 新手引导：四步流程，随状态高亮 -->
+        <section class="card guide" id="guideCard">
+          <div class="guide-steps">
+            <div class="gstep" id="gs1">
+              <span class="gnum">1</span>
+              <div class="gtext"><b>选择游戏目录</b><p>包含 versions 文件夹的 .minecraft 目录</p></div>
+            </div>
+            <div class="gstep" id="gs2">
+              <span class="gnum">2</span>
+              <div class="gtext"><b>选择版本</b><p>自动识别已安装的全部版本</p></div>
+            </div>
+            <div class="gstep" id="gs3">
+              <span class="gnum">3</span>
+              <div class="gtext"><b>登录账号</b><p>离线登录或微软正版登录</p></div>
+            </div>
+            <div class="gstep" id="gs4">
+              <span class="gnum">4</span>
+              <div class="gtext"><b>启动游戏</b><p>缺文件会提示，可强制启动</p></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2><span class="h2num">1</span>游戏目录</h2>
+          <div class="row">
+            <input type="text" id="gameDir" class="grow" placeholder="选择包含 versions 文件夹的游戏目录（如 .minecraft）" />
+            <button id="btnPickDir" class="primary">浏览…</button>
+            <button id="btnUseDefault" class="ghost">常用路径</button>
+            <button id="btnOpenDir" class="ghost">打开</button>
+          </div>
+          <p id="dirHint" class="hint"></p>
+          <div id="noVersionHint" class="empty" hidden>
+            <div class="empty-ico">
+              <svg viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z" /></svg>
+            </div>
+            <div class="empty-text">
+              <b>这个目录里还没有识别到游戏版本</b>
+              <p>如果你还没安装游戏：切到左侧「下载版本」，选个版本点安装即可（全自动）。<br />
+                 如果游戏装在别处：点「浏览…」重新选择目录。</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2><span class="h2num">2</span>游戏版本</h2>
+          <div class="row">
+            <select id="version" class="grow"></select>
+            <button id="btnRefresh" class="ghost">刷新</button>
+            <button id="btnCheck">检查文件</button>
+            <button id="btnClearNatives" class="ghost">重建本地库</button>
+            <label class="switch inline">
+              <input type="checkbox" id="autoCheck" checked />
+              <span>启动前检查</span>
+            </label>
+          </div>
+          <div id="versionMeta" class="meta"></div>
+          <div id="checkResult" class="result"></div>
+        </section>
+
+        <section class="card">
+          <h2><span class="h2num">3</span>账号登录</h2>
+          <div class="row" id="authModeRow">
+            <label class="check">
+              <input type="radio" name="authMode" value="offline" checked />
+              <span>离线登录</span>
+            </label>
+            <label class="check">
+              <input type="radio" name="authMode" value="msa" />
+              <span>微软正版登录</span>
+            </label>
+          </div>
+
+          <div id="offlineBox">
+            <div class="row">
+              <label class="field">
+                <span>玩家名</span>
+                <input type="text" id="playerName" maxlength="16" placeholder="3-16 位字母数字下划线" />
+              </label>
+              <label class="field">
+                <span>UUID</span>
+                <input type="text" id="uuid" readonly />
+              </label>
+            </div>
+            <p class="hint">离线模式只能进入关闭了正版验证的服务器（局域网联机可用）。想进正版服务器请用「微软正版登录」。</p>
+          </div>
+
+          <div id="msaBox" hidden>
+            <div class="row">
+              <button id="btnMsaLogin" class="primary">微软账号登录</button>
+              <button id="btnMsaCancel" class="ghost" disabled>取消</button>
+              <button id="btnMsaLogout" class="ghost" hidden>退出登录</button>
+              <button id="btnMsaRefresh" class="ghost" hidden>刷新登录态</button>
+            </div>
+            <div id="msaStatus" class="meta"></div>
+            <div id="msaLiveBox" class="result" hidden>
+              <p class="hint">下方是微软登录链接（已自动复制到剪贴板）。请在浏览器打开并完成登录；登录后浏览器会跳到空白页，地址栏以
+                <code>login.live.com/oauth20_desktop.srf?code=</code> 开头。请<b>点地址栏按 Ctrl+A 全选、再复制整条网址</b>（务必复制完整、不要漏掉结尾），粘贴到下方「确认」。</p>
+              <div class="row">
+                <input type="text" id="msaLoginUrl" class="grow" readonly value="" />
+                <button id="btnMsaCopyUrl" class="ghost">复制链接</button>
+              </div>
+              <div class="row">
+                <input type="text" id="msaCodeInput" class="grow" placeholder="粘贴登录后地址栏的完整网址" />
+                <button id="btnMsaSubmitCode" class="primary">确认</button>
+              </div>
+            </div>
+            <div class="callout">
+              <p>直接用你的微软账号（Outlook / Hotmail 等）登录即可，无需注册任何开发者应用。登录信息仅保存在本机。</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2><span class="h2num">4</span>Java 与内存</h2>
+          <div class="row">
+            <select id="javaPath" class="grow"></select>
+            <button id="btnDetectJava">自动检测</button>
+            <button id="btnPickJava" class="ghost">浏览</button>
+          </div>
+          <div id="javaInfo" class="meta"></div>
+          <div class="row">
+            <button id="btnInstallJava" class="ghost" hidden>自动安装 Java</button>
+            <span id="javaInstallStatus" class="hint"></span>
+          </div>
+          <div class="row">
+            <label class="field small">
+              <span>内存分配</span>
+              <select id="memoryMode">
+                <option value="auto">自动分配</option>
+                <option value="manual">手动设置</option>
+              </select>
+            </label>
+            <label class="field small" id="wrapMinMemory">
+              <span>最小内存 MB</span>
+              <input type="number" id="minMemory" min="0" step="128" />
+            </label>
+            <label class="field small" id="wrapMaxMemory">
+              <span>最大内存 MB</span>
+              <input type="number" id="maxMemory" min="256" step="128" />
+            </label>
+            <span id="autoMemHint" class="hint" hidden></span>
+          </div>
+          <div class="row">
+            <label class="field small">
+              <span>窗口宽</span>
+              <input type="number" id="winWidth" />
+            </label>
+            <label class="field small">
+              <span>窗口高</span>
+              <input type="number" id="winHeight" />
+            </label>
+            <label class="switch inline">
+              <input type="checkbox" id="fullscreen" />
+              <span>全屏</span>
+            </label>
+          </div>
+          <label class="field">
+            <span>附加 JVM 参数（可选）</span>
+            <input type="text" id="extraJvm" placeholder="例如：-XX:+UseG1GC" />
+          </label>
+        </section>
+
+        <section class="card actions">
+          <button id="btnLaunch" class="primary big">启动游戏</button>
+          <button id="btnStop" class="danger" disabled>结束进程</button>
+          <span id="status" class="status"></span>
+        </section>
+
+        <section class="card log-card">
+          <div class="log-head">
+            <h2>运行日志</h2>
+            <div>
+              <button id="btnCopyLog" class="ghost small">复制日志</button>
+              <button id="btnClearLog" class="ghost small">清空</button>
+            </div>
+          </div>
+          <pre id="log"></pre>
+        </section>
+      </div>
+
+      <!-- ============ 下载页（两步向导：选版本 → 选加载器 → 开始安装） ============ -->
+      <div id="tabDownload" hidden>
+        <section class="card guide">
+          <div class="guide-steps">
+            <div class="gstep active" id="wzStep1">
+              <span class="gnum">1</span>
+              <div class="gtext"><b>选择游戏版本</b><p>原版 / 快照 / 远古版本</p></div>
+            </div>
+            <div class="gstep" id="wzStep2">
+              <span class="gnum">2</span>
+              <div class="gtext"><b>选择加载器（可选）</b><p>Fabric / Forge / NeoForge / OptiFine</p></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== 步骤 1：选择游戏版本 ===== -->
+        <div id="dlStep1" class="dl-step">
+          <section class="card">
+            <h2><span class="h2num">1</span>下载源与筛选</h2>
+            <div class="row">
+              <select id="dlMirror" class="grow"></select>
+              <label class="switch inline">
+                <input type="checkbox" id="dlAssets" checked />
+                <span>同时下载资源文件</span>
+              </label>
+              <label class="field small">
+                <span>并发数</span>
+                <input type="number" id="dlConcurrency" min="1" max="128" value="32" />
+              </label>
+            </div>
+            <p class="hint">任一源不可用会自动回退到下一个源，最后兜底官方源；国内源均为加速节点。</p>
+          </section>
+
+          <section class="card">
+            <h2><span class="h2num">2</span>选择版本</h2>
+            <div class="row">
+              <input type="text" id="dlSearch" class="grow" placeholder="搜索版本，如 1.20.1 / 20w / rd-" />
+              <button id="btnLoadManifest" class="primary">拉取列表</button>
+            </div>
+            <div class="row filters">
+              <label class="switch"><input type="checkbox" id="fRelease" checked /><span>正式版</span></label>
+              <label class="switch"><input type="checkbox" id="fSnapshot" /><span>快照</span></label>
+              <label class="switch"><input type="checkbox" id="fOldBeta" /><span>远古/beta</span></label>
+              <label class="switch"><input type="checkbox" id="fUnlisted" /><span>未列出版本</span></label>
+              <span id="dlManifestInfo" class="hint"></span>
+            </div>
+            <div id="dlEmptyHint" class="empty">
+              <div class="empty-ico">
+                <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16" /></svg>
+              </div>
+              <div class="empty-text">
+                <b>先点「拉取列表」获取全部版本</b>
+                <p>覆盖 2009 年的远古版到最新正式版共 920 多个。选好版本后点「下一步」，进入第二步给它装加载器（也可直接装原版）。</p>
+              </div>
+            </div>
+            <select id="dlVersionList" size="12" class="vlist"></select>
+            <div class="row">
+              <button id="btnInstallVersion" class="primary" disabled>只装原版</button>
+              <span id="dlInstallInfo" class="hint"></span>
+            </div>
+            <div class="row" style="margin-top:12px">
+              <button id="btnToStep2" class="primary" disabled>下一步：选择加载器 →</button>
+              <span class="hint">选定上方版本后点这里，进入第二步给它加装加载器。</span>
+            </div>
+          </section>
+        </div>
+
+        <!-- ===== 步骤 2：选择加载器并安装 ===== -->
+        <div id="dlStep2" class="dl-step" hidden>
+          <section class="card">
+            <h2><span class="h2num">3</span>为版本 <span id="wzTargetVer" class="accent">—</span> 选择加载器</h2>
+            <div class="row">
+              <select id="ldrKind" class="grow">
+                <option value="none">原版，不安装加载器</option>
+                <option value="fabric">Fabric（推荐，全自动）</option>
+                <option value="forge">Forge（自动运行安装器）</option>
+                <option value="neoforge">NeoForge（自动运行安装器）</option>
+                <option value="optifine">OptiFine（全自动，可配合 Forge）</option>
+              </select>
+              <button id="btnBackStep1" class="ghost">← 返回</button>
+            </div>
+            <div id="ldrPick" hidden>
+              <div class="row" style="margin-top:12px">
+                <span class="hint" style="flex:none">游戏版本</span>
+                <select id="ldrMcVersion" class="grow"></select>
+                <button id="btnLoadLoaders">查询版本</button>
+                <select id="ldrVersion" class="grow"></select>
+              </div>
+              <div class="row" id="ldrComboRow" hidden>
+                <label class="check">
+                  <input type="checkbox" id="ldrComboForge" />
+                  <span>与 Forge 同时安装（生成 Forge + OptiFine 组合版本）</span>
+                </label>
+                <span class="hint">未装 Forge 时会按 OptiFine 适配版本自动先装 Forge</span>
+              </div>
+              <div id="ldrInfo" class="hint"></div>
+              <div id="ldrNamePreview" class="hint" hidden style="margin-top:8px;color:var(--accent)"></div>
+            </div>
+            <div id="ldrNoneHint" class="callout" hidden>
+              <p>已选择「原版，不安装加载器」——点下方「开始安装」只安装所选原版游戏。</p>
+            </div>
+          </section>
+
+          <section class="card actions">
+            <button id="btnInstallStack" class="primary big">开始安装</button>
+            <span id="dlStackStatus" class="status"></span>
+          </section>
+        </div>
+
+        <!-- ===== 进度（两步共用） ===== -->
+        <section class="card">
+          <div class="row">
+            <button id="btnDlCancel" class="danger" disabled>取消下载</button>
+            <span id="dlStatus" class="status"></span>
+          </div>
+          <div class="progress"><div id="dlBar"></div></div>
+          <pre id="dlLog" class="logsmall"></pre>
+        </section>
+      </div>
+
+      <!-- ============ 模组下载页 ============ -->
+      <div id="tabMods" hidden>
+        <section class="card guide">
+          <div class="guide-steps">
+            <div class="gstep active" id="ms1">
+              <span class="gnum">1</span>
+              <div class="gtext"><b>筛选 / 搜索</b><p>按版本、加载器、关键词找模组</p></div>
+            </div>
+            <div class="gstep" id="ms2">
+              <span class="gnum">2</span>
+              <div class="gtext"><b>选择安装位置</b><p>全局 mods 或某个版本隔离</p></div>
+            </div>
+            <div class="gstep" id="ms3">
+              <span class="gnum">3</span>
+              <div class="gtext"><b>看详情选版本</b><p>全部版本 + 前置模组，进度悬浮右侧</p></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2><span class="h2num">1</span>筛选与搜索</h2>
+          <div class="row">
+            <input type="text" id="modSearch" class="grow" placeholder="搜索模组，如 fabric-api / 优化 / 冒险" />
+            <select id="modGameVersion" class="mod-filter"></select>
+            <select id="modLoader" class="mod-filter"></select>
+            <select id="modCategory" class="mod-filter"></select>
+            <select id="modSort" class="mod-filter">
+              <option value="relevance">相关度</option>
+              <option value="downloads">下载量</option>
+              <option value="follows">关注数</option>
+              <option value="newest">最新发布</option>
+              <option value="updated">最近更新</option>
+            </select>
+            <button id="btnModSearch" class="primary">搜索</button>
+          </div>
+          <p id="modSearchInfo" class="hint"></p>
+        </section>
+
+        <section class="card">
+          <h2><span class="h2num">2</span>安装位置</h2>
+          <div class="row">
+            <select id="modTarget" class="grow"></select>
+            <span class="hint">「全局 mods」装到游戏目录的 mods 文件夹；「版本隔离」装到对应版本的 mods 文件夹。</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2><span class="h2num">3</span>搜索结果</h2>
+          <div id="modResults" class="mod-grid"></div>
+          <div id="modEmpty" class="empty">
+            <div class="empty-ico">
+              <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16" /></svg>
+            </div>
+            <div class="empty-text">
+              <b>先设置筛选条件，点「搜索」</b>
+              <p>数据来自 Modrinth（无需 Key，覆盖绝大多数主流模组）。支持按游戏版本、加载器、分类筛选与关键词搜索。</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2><span class="h2num">4</span>下载与进度</h2>
+          <p class="hint">选中模组点「查看详情」，可在详情页看到<strong>全部版本</strong>（按游戏版本与加载器分组）和<strong>前置模组</strong>，自己指定版本后再下载。下载进度会<strong>悬浮在窗口右侧</strong>显示，每个任务都能单独取消；点标题栏可收起为右下角小胶囊。</p>
+        </section>
+      </div><!-- 关闭 tabMods：此前缺少此闭合标签，导致 tabVersions 嵌套进 tabMods，而 tabMods 带 hidden(display:none)，嵌在里面的版本管理页永远不渲染 -->
+
+      <!-- ============ 版本管理页 ============ -->
+      <div id="tabVersions" hidden>
+        <section class="card">
+          <h2><span class="h2num">★</span>版本管理</h2>
+          <p class="hint">点左侧版本，即可管理它的<strong>实例隔离</strong>、<strong>模组</strong>、<strong>世界</strong>、<strong>资源包</strong>与<strong>截图</strong>。每个版本都是独立面板。</p>
+        </section>
+        <div class="vm-layout">
+          <aside class="vm-list" id="vmList"></aside>
+          <div class="vm-detail" id="vmDetail">
+            <div class="empty" id="vmEmpty">
+              <div class="empty-ico">
+                <svg viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4-9-4zm0 5l9 4 9-4M3 17l9 4 9-4" /></svg>
+              </div>
+              <div class="empty-text">
+                <b>选择一个版本</b>
+                <p>从左侧列表点选一个版本，即可查看与修改它的独立配置、模组、世界、资源包、截图，并支持备份与删除。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 下载地图（Planet Minecraft，内嵌浏览 + 本地 zip 安装） ============ -->
+      <div id="tabMaps" hidden></div>
+
+      <!-- ============ 下载光影（Modrinth） ============ -->
+      <div id="tabShaders" hidden data-mr-browse data-mr-type="shader" data-mr-title="光影" data-mr-install="shaderpacks"></div>
+
+      <!-- ============ 下载资源包（Modrinth） ============ -->
+      <div id="tabResourcepacks" hidden data-mr-browse data-mr-type="resourcepack" data-mr-title="资源包" data-mr-install="resourcepacks"></div>
+
+      <!-- ============ 工具箱（任意链接下载 / 整合包导入导出） ============ -->
+      <div id="tabTools" hidden></div>
+
+      <!-- ============ 联机（陶瓦联机 / Terracotta，启动器内拉起，不跳浏览器） ============ -->
+      <div id="tabMultiplayer" hidden></div>
+
+      <!-- ============ 设置（主题 / 标题 / 彩蛋） ============ -->
+      <div id="tabSettings" hidden></div>
+    </main>
+  </div>
+
+  <script src="nav.js"></script>
+  <script src="download.js"></script>
+  <script src="app.js"></script>
+  <script src="dl-dock.js"></script>
+  <script src="mods.js"></script>
+  <script src="version.js"></script>
+  <script src="mr-browse.js"></script>
+  <script src="maps-browse.js"></script>
+  <script src="tools.js"></script>
+  <script src="multiplayer.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>

@@ -1,0 +1,65 @@
+{
+  "name": "mc-launcher",
+  "productName": "MC 启动器",
+  "version": "0.1.2",
+  "description": "Minecraft Java 版启动器（本地识别 + 离线/正版登录 + 下载安装 + 启动）",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node tests/core.test.js && node tests/launch.test.js && node tests/msauth.test.js && node tests/loaders.test.js && node tests/optifine.test.js && node tests/modplatforms.test.js && node tests/cancel.test.js && node tests/maps-test.js && node tests/instance.test.js && node tests/modpack.test.js",
+    "test-heavy": "node tests/download.test.js",
+    "dist": "node scripts/build.js",
+    "dist:dir": "node scripts/build.js --dir",
+    "release": "node scripts/publish.js",
+    "ship": "node scripts/build.js && node scripts/publish.js"
+  },
+  "author": "mc-launcher",
+  "license": "MIT",
+  "build": {
+    "appId": "com.mclauncher.app",
+    "productName": "MC 启动器",
+    "copyright": "Copyright © 2026 mc-launcher",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "renderer/**/*",
+      "assets/**/*",
+      "!assets/tools/**",
+      "package.json"
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "signAndEditExecutable": false,
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "MC启动器-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MC 启动器",
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "MC启动器-${version}-便携版.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "jsdom": "^30.1.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  }
+}
