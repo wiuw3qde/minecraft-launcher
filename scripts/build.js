@@ -21,6 +21,19 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const root = path.join(__dirname, '..');
+
+/**
+ * 把本地中文产物名映射成 ASCII 名。GitHub 的 Release 资产上传接口对中文 name
+ * 参数会损坏（落到 default.txt 或乱码），而更新器只按 latest.yml 里的文件名
+ * 去匹配下载，因此 GitHub 资产名 + latest.yml 里的名必须都是 ASCII 且一致。
+ */
+function asciiName(f) {
+  return f
+    .replace(/^MC启动器-/, 'MC-Launcher-')
+    .replace(/-便携版(?=\.)/, '-portable')
+    .replace(/[^\x20-\x7E]/g, ''); // 兜底：移除任何残留非 ASCII（含中文）
+}
+
 const CLI = path.join(root, 'node_modules', 'electron-builder', 'cli.js');
 const RCEDIT = path.join(root, 'assets', 'tools', 'rcedit-x64.exe');
 const ICON = path.join(root, 'assets', 'icon.ico');
@@ -190,11 +203,11 @@ function genLatestYml() {
   yml += "releaseDate: '" + releaseDate + "'\n";
   yml += 'files:\n';
   items.forEach((x) => {
-    yml += "  - url: '" + x.file + "'\n";
+    yml += "  - url: '" + asciiName(x.file) + "'\n";
     yml += '    sha512: ' + x.sha512 + '\n';
     yml += '    size: ' + x.size + '\n';
   });
-  yml += "path: '" + primary.file + "'\n";
+  yml += "path: '" + asciiName(primary.file) + "'\n";
   yml += 'sha512: ' + primary.sha512 + '\n';
   fs.writeFileSync(path.join(distDir, 'latest.yml'), yml, 'utf8');
   console.log('[build] 已生成 latest.yml（更新清单，主文件 ' + primary.file + '）');

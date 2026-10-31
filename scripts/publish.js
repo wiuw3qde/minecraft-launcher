@@ -51,6 +51,18 @@ if (!TOKEN) {
   process.exit(1);
 }
 
+/**
+ * 把本地中文产物名映射成 ASCII 名（与 build.js 保持一致）。
+ * GitHub 资产上传对中文 name 会损坏，更新器按 latest.yml 里的文件名下载，
+ * 所以 GitHub 资产名与 latest.yml 必须都是 ASCII 且一致。
+ */
+function asciiName(f) {
+  return f
+    .replace(/^MC启动器-/, 'MC-Launcher-')
+    .replace(/-便携版(?=\.)/, '-portable')
+    .replace(/[^\x20-\x7E]/g, '');
+}
+
 // ---------- 版本 ----------
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const VERSION = pkg.version;
@@ -92,7 +104,7 @@ function gh(method, p, body) {
 // 上传二进制资产（流式，支持大文件）
 function uploadAsset(releaseId, filePath) {
   return new Promise((resolve, reject) => {
-    const name = path.basename(filePath);
+    const name = asciiName(path.basename(filePath));
     const stat = fs.statSync(filePath);
     const req = https.request(
       UPLOAD_API + `/repos/${OWNER}/${REPO_NAME}/releases/${releaseId}/assets?name=${encodeURIComponent(name)}`,
