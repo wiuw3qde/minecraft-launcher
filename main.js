@@ -235,10 +235,14 @@ function configureUpdaterFeed() {
     return null;
   }
 }
-/** 注册自动更新事件监听（仅打包后调用） */
-function initUpdater() {
-  if (!app.isPackaged) return; // 开发模式不检查，避免误连
-  if (!configureUpdaterFeed()) return; // 未配置地址则跳过
+/** 绑定自动更新事件监听（只绑一次）。
+ *  关键：无论启动时是否已配置地址都要先绑，否则事后保存 URL 再检查时，
+ *  事件监听尚未注册，update-available / update-not-available 永远收不到，
+ *  渲染端就会一直卡在「正在检查更新…」而无法刷新状态。 */
+let updaterListenersBound = false;
+function bindUpdaterListeners() {
+  if (updaterListenersBound) return;
+  updaterListenersBound = true;
   autoUpdater.autoDownload = false; // 先提示，用户确认后再下载
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.on('update-available', (info) =>
@@ -254,6 +258,19 @@ function initUpdater() {
     pushUpdater({ type: 'downloaded', version: info.version })
   );
   autoUpdater.on('error', (e) => pushUpdater({ type: 'error', message: e && e.message ? e.message : String(e) }));
+}
+
+/** 注册自动更新（仅打包后调用） */
+function initUpdater() {
+  if (!app.isPackaged) return; // 开发模式不检查，避免误连
+  bindUpdaterListeners(); // 无条件先绑监听（见上方说明）
+  // 本机若配置了指向本地的不可靠代理（如 127.0.0.1:xxxx），
+  // 会让 electron 网络层在更新检查时卡死；打包后强制走直连规避。
+  const envProxy = process.env.HTTP_PROXY || process.env.HTTPS_PROXY ||
+    process.env.http_proxy || process.env.https_proxy || '';
+  if (envProxy && /127\.0\.0\.1|localhost|::1/.test(envProxy) && session && session.defaultSession) {
+    session.defaultSession.setProxy({ proxyRules: 'direct://' }).catch(() => {});
+  }
 }
 
 /* ---------------- IPC ---------------- */
@@ -293,8 +310,14 @@ ipcMain.handle('updater:info', () => {
 ipcMain.handle('updater:check', async () => {
   if (!app.isPackaged) return { ok: false, dev: true };
   if (!configureUpdaterFeed()) return { ok: false, noUrl: true };
+  bindUpdaterListeners(); // 兜底：检查前再绑一次，确保事件必达渲染端
   try {
-    const r = await autoUpdater.checkForUpdates();
+    const checkPromise = autoUpdater.checkForUpdates();
+    // 超时兜底：网络卡死时也不让界面永久停在「正在检查更新…」
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('检查超时（15 秒内无响应，可能是网络或代理问题）')), 15000)
+    );
+    const r = await Promise.race([checkPromise, timeout]);
     return { ok: true, updateInfo: r ? r.updateInfo : null };
   } catch (e) {
     return { ok: false, error: e && e.message ? e.message : String(e) };
