@@ -19,6 +19,9 @@ const https = require('https');
 const { execSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
+// 构建产物目录：默认 dist/，与 build.js 的 BUILD_OUT_DIR 保持一致；
+// C 盘空间不足时 build.js 会把产物输出到其他盘（如 D:），发布也从同一目录读取。
+const DIST_DIR = process.env.BUILD_OUT_DIR || path.join(ROOT, 'dist');
 const API = 'https://api.github.com';
 // GitHub 的 Release 资源（创建/读取）走 api.github.com，
 // 但「上传资产」必须走独立主机 uploads.github.com，用 api 域会上传 404。
@@ -159,7 +162,7 @@ function buildChangelog() {
 
 // ---------- 主流程 ----------
 (async () => {
-  const distDir = path.join(ROOT, 'dist');
+  const distDir = DIST_DIR;
   if (!fs.existsSync(distDir)) {
     console.error('[publish] 找不到 dist/ 目录，请先运行 npm run dist 打包。');
     process.exit(1);

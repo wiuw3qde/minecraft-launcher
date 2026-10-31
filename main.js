@@ -29,6 +29,8 @@ const { autoUpdater } = require('electron-updater');
 
 // 版本号统一以 package.json 为准，避免打包升版后启动器里显示的仍是旧号
 const APP_VERSION = require('./package.json').version;
+// 默认更新源：开箱即用，无需用户手动填；用户也可在设置里改成自己的仓库
+const DEFAULT_UPDATER_URL = 'https://github.com/wiuw3qde/minecraft-launcher';
 
 let win = null;
 const launcher = new Launcher();
@@ -180,14 +182,14 @@ app.whenReady().then(() => {
     javaFinder.addJavaRoot(path.join(app.getPath('userData'), 'runtime'));
   } catch (e) { /* ignore */ }
   createWindow();
-  // 自动更新：打包后若已配置地址，启动 3 秒后静默检查一次
+  // 自动更新：打包后启动 3 秒后静默检查一次
   initUpdater();
   if (app.isPackaged) {
     setTimeout(() => {
-      const cfg = readConfig();
-      if ((cfg.updaterUrl || '').trim()) {
-        try { autoUpdater.checkForUpdates(); } catch (e) { console.error('[updater] 自动检查失败', e.message); }
-      }
+      // 必须先 configureUpdaterFeed() 调 setFeedURL()，否则 clientPromise 为 null，
+      // electron-updater 会退化去读 resources/app-update.yml（缺失则 ENOENT）
+      if (!configureUpdaterFeed()) return;
+      try { autoUpdater.checkForUpdates(); } catch (e) { console.error('[updater] 自动检查失败', e.message); }
     }, 3000);
   }
   app.on('activate', () => {
@@ -209,8 +211,8 @@ function pushUpdater(payload) {
 /** 根据 config.updaterUrl 配置更新源；未配置或失败返回 null */
 function configureUpdaterFeed() {
   const cfg = readConfig();
-  const raw = (cfg.updaterUrl || '').trim();
-  if (!raw) return null;
+  // 未配置时使用默认更新源，保证开箱即可自动更新
+  const raw = (cfg.updaterUrl || '').trim() || DEFAULT_UPDATER_URL;
   // GitHub Releases：用内置 github provider（自动找最新 release + 下载资产，公开仓库无需令牌）
   const m = raw.match(/github\.com\/([^\/\s?#]+)\/([^\/\s?#]+)/i);
   if (m) {
@@ -288,6 +290,7 @@ ipcMain.handle('config:get', () => {
   if (!cfg.launcherTitle) cfg.launcherTitle = 'MC 启动器';
   if (cfg.easterEgg === undefined) cfg.easterEgg = false;
   if (!cfg.memoryMode) cfg.memoryMode = 'auto';
+  if (!cfg.updaterUrl) cfg.updaterUrl = DEFAULT_UPDATER_URL;
   return cfg;
 });
 

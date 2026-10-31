@@ -1,7 +1,7 @@
 {
   "name": "mc-launcher",
   "productName": "MC 启动器",
-  "version": "0.1.6",
+  "version": "0.1.8",
   "description": "Minecraft Java 版启动器（本地识别 + 离线/正版登录 + 下载安装 + 启动）",
   "main": "main.js",
   "scripts": {
@@ -54,6 +54,13 @@
       "artifactName": "MC启动器-${version}-便携版.${ext}"
     }
   },
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "wiuw3qde",
+      "repo": "minecraft-launcher"
+    }
+  ],
   "devDependencies": {
     "electron": "^33.3.1",
     "electron-builder": "^25.1.8",

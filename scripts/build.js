@@ -37,9 +37,12 @@ function asciiName(f) {
 const CLI = path.join(root, 'node_modules', 'electron-builder', 'cli.js');
 const RCEDIT = path.join(root, 'assets', 'tools', 'rcedit-x64.exe');
 const ICON = path.join(root, 'assets', 'icon.ico');
+// 构建产物根目录：默认 dist/，可通过 BUILD_OUT_DIR 指定到其他盘（C 盘空间不足时
+// 把解压/打包产物放到 D: 等空闲盘，避免「磁盘空间不足」导致构建失败）。
+const OUT_BASE = process.env.BUILD_OUT_DIR || path.join(root, 'dist');
 // 每次构建用带时间戳的临时输出目录，避免旧的 win-unpacked 被系统/杀软锁住时
-// electron-builder 无法清理而整体构建失败。最终安装包仍输出到 dist/。
-const STAGE_OUT = path.join(root, 'dist', 'tmp-' + Date.now());
+// electron-builder 无法清理而整体构建失败。最终安装包仍输出到 OUT_BASE。
+const STAGE_OUT = path.join(OUT_BASE, 'tmp-' + Date.now());
 const UNPACKED = path.join(STAGE_OUT, 'win-unpacked');
 function bumpVersion() {
   const pkgPath = path.join(root, 'package.json');
@@ -114,22 +117,43 @@ function editExecutable() {
   console.log('[build] 图标与版本信息注入完成');
 }
 
-/** 校验 exe 的版本信息是否符合预期（防止历史构建残留导致的脏数据） */
+/** 校验 exe 的版本信息是否符合预期（防止历史构建残留导致的脏数据）。
+ *  返回 true/false，不再自行 exit，交给调用方决定是否重试。 */
 function verifyExecutable(label) {
-  if (!fs.existsSync(UNPACKED)) return;
+  if (!fs.existsSync(UNPACKED)) {
+    console.warn('[build] 跳过校验：' + UNPACKED + ' 不存在');
+    return false;
+  }
   const exes = fs
     .readdirSync(UNPACKED)
     .filter((f) => f.toLowerCase().endsWith('.exe'))
     .map((f) => ({ name: f, size: fs.statSync(path.join(UNPACKED, f)).size }))
     .sort((a, b) => b.size - a.size);
-  if (!exes.length) return;
+  if (!exes.length) {
+    console.warn('[build] 跳过校验：win-unpacked 里没有 exe');
+    return false;
+  }
   const r = spawnSync(process.execPath, [path.join(__dirname, 'verify-exe.js'), path.join(UNPACKED, exes[0].name), 'MC 启动器'], {
     stdio: 'inherit',
   });
   if (r.status !== 0) {
-    console.error(`[build] ${label}校验未通过，请检查构建产物`);
-    process.exit(1);
+    console.error(`[build] ${label}校验未通过`);
+    return false;
   }
+  return true;
+}
+
+/** 带重试的校验：杀软偶尔会短暂锁住刚生成/刚注入的 exe，导致偶发读取失败，重试可稳过 */
+function verifyExecutableWithRetry(label, attempts) {
+  const n = attempts || 3;
+  for (let attempt = 1; attempt <= n; attempt++) {
+    if (verifyExecutable(`${label}(第${attempt}次)`)) return true;
+    if (attempt < n) {
+      console.warn(`[build] 校验失败，${attempt < n ? '1 秒后重试…' : '已放弃'}`);
+      try { require('child_process').execSync('ping -n 2 127.0.0.1 >nul 2>&1'); } catch (_) { /* ignore */ }
+    }
+  }
+  return false;
 }
 
 /* ---------------- 主流程 ---------------- */
@@ -142,24 +166,57 @@ runBuilder(['--win', '--x64', '--dir', '-c.directories.output=' + STAGE_OUT], '�
 // 2. 注入图标与版本信息
 editExecutable();
 
-// 2.5 注入后立即校验，有问题当场失败
-verifyExecutable('注入后');
+/**
+ * 兜底写入 resources/app-update.yml。
+ * electron-updater 在「下载更新」阶段（必然）以及「未先 setFeedURL 就检查」时会去读
+ * resources/app-update.yml 取 updaterCacheDirName / provider 配置；若该文件缺失，
+ * 更新会直接报 ENOENT。正常情况下 electron-builder 会因上面的 build.publish 自动生成它，
+ * 这里再兜底一次，保证任何情况下打包产物里都有这个文件。
+ */
+function ensureAppUpdateYml() {
+  const resDir = path.join(UNPACKED, 'resources');
+  const target = path.join(resDir, 'app-update.yml');
+  if (fs.existsSync(target)) {
+    console.log('[build] app-update.yml 已存在（electron-builder 生成），跳过兜底写入');
+    return;
+  }
+  fs.mkdirSync(resDir, { recursive: true });
+  const lines = [
+    'owner: wiuw3qde',
+    'repo: minecraft-launcher',
+    'provider: github',
+    'updaterCacheDirName: mc-launcher-updater',
+    '',
+  ];
+  fs.writeFileSync(target, lines.join('\n'), 'utf8');
+  console.log('[build] 已兜底写入 resources/app-update.yml');
+}
+ensureAppUpdateYml();
+
+// 2.5 注入后立即校验（带重试，规避杀软偶发锁文件）
+if (!verifyExecutableWithRetry('注入后', 3)) {
+  console.error('[build] 图标注入/校验多次失败，终止构建');
+  process.exit(1);
+}
 
 if (dirOnly) {
   console.log('\n[build] 完成（仅目录模式）：dist/win-unpacked\n');
   process.exit(0);
 }
 
-// 3. 从注入过图标的目录生成安装包 + 便携版（最终产物仍输出到 dist/）
-runBuilder(['--win', '--x64', '--prepackaged=' + UNPACKED, '-c.directories.output=' + path.join(root, 'dist')], '生成安装包与便携版');
+// 3. 从注入过图标的目录生成安装包 + 便携版（最终产物输出到 OUT_BASE）
+runBuilder(['--win', '--x64', '--prepackaged=' + UNPACKED, '-c.directories.output=' + OUT_BASE], '生成安装包与便携版');
 
-// 3.5 最终校验（防止安装包生成过程又动了 exe）
-verifyExecutable('最终');
+// 3.5 最终校验（防止安装包生成过程又动了 exe，带重试）
+if (!verifyExecutableWithRetry('最终', 3)) {
+  console.error('[build] 最终校验多次失败，终止构建');
+  process.exit(1);
+}
 
-console.log('\n[build] 全部完成，产物在 dist/ 目录：');
+console.log('\n[build] 全部完成，产物在 ' + OUT_BASE + ' 目录：');
 try {
-  for (const f of fs.readdirSync(path.join(root, 'dist'))) {
-    const st = fs.statSync(path.join(root, 'dist', f));
+  for (const f of fs.readdirSync(OUT_BASE)) {
+    const st = fs.statSync(path.join(OUT_BASE, f));
     if (st.isFile()) console.log('  - ' + f + '  (' + Math.round(st.size / 1048576) + ' MB)');
   }
 } catch (e) {
@@ -168,9 +225,8 @@ try {
 
 // 4. 清理历史遗留的临时构建目录（跳过本次使用的 STAGE_OUT，失败忽略）
 try {
-  const distDir = path.join(root, 'dist');
-  for (const f of fs.readdirSync(distDir)) {
-    const full = path.join(distDir, f);
+  for (const f of fs.readdirSync(OUT_BASE)) {
+    const full = path.join(OUT_BASE, f);
     if (/^tmp-\d+$/.test(f) && full !== STAGE_OUT) {
       fs.rmSync(full, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
     }
@@ -179,9 +235,27 @@ try {
   /* ignore */
 }
 
+// 5. 若产物输出到了非默认盘（BUILD_OUT_DIR），把最新版的安装包/便携版/更新清单
+//    同步回项目 dist/，方便本地直接拿最新包测试（C 盘空间不足时跳过该步）。
+if (OUT_BASE !== path.join(root, 'dist')) {
+  try {
+    const targetDir = path.join(root, 'dist');
+    fs.mkdirSync(targetDir, { recursive: true });
+    const assets = fs.readdirSync(OUT_BASE).filter((f) => /\.exe$/i.test(f) || f === 'latest.yml');
+    const VERSION_SAFE = VERSION;
+    const keep = assets.filter((f) => f.includes(VERSION_SAFE) || f === 'latest.yml');
+    for (const f of keep) {
+      fs.copyFileSync(path.join(OUT_BASE, f), path.join(targetDir, f));
+    }
+    console.log('[build] 已把当前版本产物同步回 dist/（' + keep.length + ' 个文件）');
+  } catch (e) {
+    console.warn('[build] 同步回 dist/ 失败（可忽略，发布仍从 BUILD_OUT_DIR 读取）：' + e.message);
+  }
+}
+
 /** 生成更新服务器清单 latest.yml（electron-updater generic provider 格式） */
 function genLatestYml() {
-  const distDir = path.join(root, 'dist');
+  const distDir = OUT_BASE;
   let exes = [];
   try {
     // 只把当前版本的安装包/便携版写进更新清单，避免历史版本堆积导致 latest.yml 膨胀
