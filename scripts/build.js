@@ -49,11 +49,21 @@ function bumpVersion() {
   const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
   const parts = String(pkg.version || '0.0.0').split('.');
   while (parts.length < 3) parts.push('0');
-  let patch = parseInt(parts[2], 10);
-  if (isNaN(patch)) patch = 0;
-  parts[2] = String(patch + 1);
-  pkg.version = parts.join('.');
-  fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+  let major = parseInt(parts[0], 10) || 0;
+  let minor = parseInt(parts[1], 10) || 0;
+  let patch = parseInt(parts[2], 10) || 0;
+  // 版本进位规则（与发布约定一致）：
+  //   - 当 patch === 9 时，进位到下一个 minor 并把 patch 归零：0.X.9 → 0.(X+1).0
+  //   - 否则保持当前版本号不变（避免开发态的 0.X.0 被无脑 +1）
+  if (patch === 9) {
+    minor += 1;
+    patch = 0;
+    parts[0] = String(major);
+    parts[1] = String(minor);
+    parts[2] = String(patch);
+    pkg.version = parts.join('.');
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+  }
   return pkg.version;
 }
 const VERSION = bumpVersion();

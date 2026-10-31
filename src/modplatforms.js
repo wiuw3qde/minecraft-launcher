@@ -167,6 +167,7 @@ async function resolveDownload(projectId, opts) {
   return {
     versionId: ver.id,
     versionName: ver.name || ver.version_number,
+    versionNumber: ver.version_number || ver.name,
     gameVersions: ver.game_versions,
     loaders: ver.loaders,
     file: {
@@ -309,6 +310,92 @@ async function getProjectVersions(projectId) {
   return (await getJson(MR_API + '/project/' + encodeURIComponent(projectId) + '/version')) || [];
 }
 
+/** 文件的 sha1（用于按 hash 反查 Modrinth 版本） */
+function sha1File(file) {
+  return sha1OfStream(file);
+}
+
+/** 按单个文件 hash 反查版本（命中返回 version 对象，404 返回 null） */
+async function getVersionByHash(hash, algorithm) {
+  const algo = algorithm || 'sha1';
+  try {
+    return await getJson(MR_API + '/version_file/' + encodeURIComponent(hash) + '?algorithm=' + algo);
+  } catch (e) {
+    if (/HTTP 404/.test(String(e && e.message))) return null;
+    throw e;
+  }
+}
+
+/** 带体的 JSON POST（Modrinth 批量接口用） */
+function postJson(url, body) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = https.request(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'User-Agent': UA,
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data),
+        },
+        timeout: TIMEOUT,
+      },
+      (res) => {
+        let buf = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => (buf += c));
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              resolve(JSON.parse(buf));
+            } catch (e) {
+              reject(new Error('JSON 解析失败'));
+            }
+          } else {
+            reject(new Error('HTTP ' + res.statusCode));
+          }
+        });
+      }
+    );
+    req.on('timeout', () => req.destroy(new Error('连接超时')));
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+/**
+ * 批量按 sha1 反查已装文件的 Modrinth 版本（比解析 jar 元数据精准得多：
+ * 直接得到 project_id 与 version id，可据此做「是否已最新」的精确判定）。
+ * @param {string[]} hashes sha1 数组
+ * @returns {Promise<Object>} { sha1: version对象 }
+ */
+async function getVersionsByHashes(hashes) {
+  const arr = (hashes || []).filter(Boolean);
+  const out = {};
+  if (!arr.length) return out;
+  try {
+    const map = await postJson(MR_API + '/version_files', { hashes: arr, algorithm: 'sha1' });
+    arr.forEach((h) => {
+      if (map && map[h]) out[h] = map[h];
+    });
+    return out;
+  } catch (e) {
+    // 批量接口不可用时退化为逐个查询
+    for (const h of arr) {
+      try {
+        const v = await getVersionByHash(h);
+        if (v) out[h] = v;
+      } catch (e2) {
+        /* 单个失败忽略 */
+      }
+    }
+    return out;
+  }
+}
+
 /** 批量取多个项目的基本信息（用于把依赖的 project_id 解析成可读标题） */
 async function getProjectsByIds(ids) {
   const arr = (ids || []).filter(Boolean);
@@ -411,6 +498,9 @@ module.exports = {
   pickBestVersion,
   getProject,
   getProjectVersions,
+  sha1File,
+  getVersionByHash,
+  getVersionsByHashes,
   getProjectsByIds,
   getModDetail,
   MR_API,

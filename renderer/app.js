@@ -671,6 +671,10 @@ async function init() {
   $('btnClearLog').addEventListener('click', () => {
     $('log').textContent = '';
   });
+  const btnFeedback = $('btnFeedback');
+  if (btnFeedback) btnFeedback.addEventListener('click', () => {
+    if (window.Feedback) window.Feedback.open();
+  });
   $('btnCopyLog').addEventListener('click', async () => {
     await navigator.clipboard.writeText($('log').textContent);
     status2('日志已复制到剪贴板', false);

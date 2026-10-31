@@ -5,6 +5,26 @@ const path = require('path');
 const os = require('os');
 const { extractAll } = require('./zip');
 
+/* 跨盘移动兜底：fs.renameSync 在跨卷时会抛 EXDEV（临时目录与游戏目录不在同一盘时必现），
+ * 此时退化为「递归复制 + 删除源」。 */
+function moveDir(src, dest) {
+  try {
+    fs.renameSync(src, dest);
+    return;
+  } catch (e) {
+    if (e.code !== 'EXDEV' && e.code !== 'EPERM') throw e;
+  }
+  fs.mkdirSync(dest, { recursive: true });
+  for (const n of fs.readdirSync(src)) {
+    const s = path.join(src, n);
+    const d = path.join(dest, n);
+    const st = fs.lstatSync(s);
+    if (st.isDirectory()) moveDir(s, d);
+    else fs.copyFileSync(s, d);
+  }
+  fs.rmSync(src, { recursive: true, force: true });
+}
+
 function installWorldZip(zipFilePath, savesDir) {
   if (!zipFilePath || !fs.existsSync(zipFilePath)) return { ok: false, error: '未找到 zip 文件' };
   fs.mkdirSync(savesDir, { recursive: true });
@@ -32,7 +52,7 @@ function installWorldZip(zipFilePath, savesDir) {
     const dest = path.join(savesDir, worldFolder);
     if (fs.existsSync(dest)) return { ok: false, error: '已存在同名世界：' + worldFolder };
     fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.renameSync(path.join(tmp, worldFolder), dest);
+    moveDir(path.join(tmp, worldFolder), dest);
     return { ok: true, installed: worldFolder, dest };
   } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { /* ignore */ }

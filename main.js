@@ -25,6 +25,7 @@ const logDiagnose = require('./src/log-diagnose');
 const instance = require('./src/instance');
 const modpack = require('./src/modpack');
 const javadl = require('./src/javadl');
+const modupdate = require('./src/modupdate');
 const { autoUpdater } = require('electron-updater');
 
 // 版本号统一以 package.json 为准，避免打包升版后启动器里显示的仍是旧号
@@ -137,6 +138,11 @@ function createWindow() {
   });
   launcher.on('exit', (code) => {
     if (win && !win.isDestroyed()) win.webContents.send('launch:exit', code);
+  });
+  // 启动后把遗留的崩溃 dump 推给渲染层，由主页面弹横幅引导「一键上报」
+  win.webContents.on('did-finish-load', () => {
+    const dumps = listCrashDumps();
+    if (win && !win.isDestroyed()) win.webContents.send('app:crash-detected', dumps);
   });
   win.on('closed', () => {
     win = null;
@@ -784,6 +790,22 @@ ipcMain.handle('mods:download', async (event, opts) => {
       onLog: (t) => modSend('mods:log', { taskId, text: t }),
       shouldCancel: () => modCancels[taskId],
     });
+    // 安装成功：写 sidecar 元数据，供「Mod 更新检测」可靠识别由本启动器安装的 mod
+    if (res.ok && res.dest) {
+      try {
+        const base = path.basename(res.dest).replace(/\.(jar|zip)$/i, '');
+        modupdate.recordMod(opts.destDir, base, {
+          projectId: opts.projectId,
+          slug: opts.projectId,
+          versionId: resolved.versionId,
+          versionNumber: resolved.versionNumber || resolved.versionName,
+          loader: (resolved.loaders || [])[0] || '',
+          gameVersions: resolved.gameVersions || [],
+        });
+      } catch (e) {
+        /* sidecar 写入失败不影响下载结果 */
+      }
+    }
     const done = {
       ok: res.ok,
       skipped: !!res.skipped,
@@ -807,6 +829,92 @@ ipcMain.handle('mods:download', async (event, opts) => {
 ipcMain.handle('mods:cancel', (event, taskId) => {
   if (taskId) modCancels[taskId] = true;
   return true;
+});
+
+/* ---------------- 版本管理页：Mod 更新检测（A 功能） ---------------- */
+
+ipcMain.handle('version:mods-check-updates', async (event, gameDir, versionId) => {
+  try {
+    const cfg = readConfig();
+    const settings = cfg.versionSettings || {};
+    const isolated = !!(settings[versionId] && settings[versionId].isolated);
+    const res = scanner.listVersions(gameDir);
+    const meta = (res.versions || []).find((v) => v.id === versionId) || {};
+    return await modupdate.checkUpdates({ gameDir, versionId, isolated, versionMeta: meta });
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('version:mods-update', async (event, opts) => {
+  const taskId = opts.taskId || 'upd' + Date.now() + Math.random().toString(16).slice(2);
+  const gameDir = opts.gameDir;
+  const versionId = opts.versionId;
+  const modName = opts.modName; // 待替换的旧文件名（含 .jar / .jar.disabled）
+  const projectId = opts.projectId;
+  const mrVersionId = opts.mrVersionId;
+  if (!gameDir || !versionId || !projectId || !mrVersionId) {
+    return { ok: false, error: '参数不完整', taskId };
+  }
+  const cfg = readConfig();
+  const settings = cfg.versionSettings || {};
+  const isolated = !!(settings[versionId] && settings[versionId].isolated);
+  const modsDir = instance.modsDirFor(gameDir, versionId, isolated);
+  modCancels[taskId] = false;
+  try {
+    const resolved = await modplatforms.resolveDownload(projectId, { versionId: mrVersionId });
+    const payload = {
+      taskId,
+      name: resolved.file.filename,
+      versionName: resolved.versionName,
+      loaders: resolved.loaders,
+      gameVersions: resolved.gameVersions,
+    };
+    modSend('mods:progress', Object.assign({ percent: 0, loaded: 0, total: 0 }, payload));
+    const res = await modplatforms.downloadFileWithProgress(resolved.file, modsDir, {
+      onProgress: (p) => modSend('mods:progress', Object.assign({}, payload, p)),
+      onLog: (t) => modSend('mods:log', { taskId, text: t }),
+      shouldCancel: () => modCancels[taskId],
+    });
+    if (!res.ok) {
+      const done = { ok: false, cancelled: !!res.cancelled, error: res.error, taskId };
+      modSend('mods:done', done);
+      return done;
+    }
+    // 下载成功：删除旧的 mod 文件（含 .disabled 变体），并更新 sidecar
+    let removed = [];
+    try {
+      const baseOld = modName.replace(/\.disabled$/i, '').replace(/\.(jar|zip)$/i, '');
+      const newPath = path.resolve(res.dest);
+      ['', '.disabled'].forEach((suf) => {
+        const cand = path.join(modsDir, baseOld + '.jar' + suf);
+        // 关键：新版文件名可能和旧版完全一样，此时绝不能删（会把刚下载的删掉）
+        if (path.resolve(cand) === newPath) return;
+        if (fs.existsSync(cand)) { fs.unlinkSync(cand); removed.push(path.basename(cand)); }
+      });
+      modupdate.removeMod(modsDir, baseOld);
+      const baseNew = path.basename(res.dest).replace(/\.(jar|zip)$/i, '');
+      modupdate.recordMod(modsDir, baseNew, {
+        projectId,
+        slug: projectId,
+        versionId: resolved.versionId,
+        versionNumber: resolved.versionNumber || resolved.versionName,
+        loader: (resolved.loaders || [])[0] || '',
+        gameVersions: resolved.gameVersions || [],
+      });
+    } catch (e) {
+      /* 删旧文件/写 sidecar 失败不阻断成功结果 */
+    }
+    const done = { ok: true, dest: res.dest, removed, taskId, name: resolved.file.filename };
+    modSend('mods:done', done);
+    return done;
+  } catch (err) {
+    const done = { ok: false, error: err.message, taskId };
+    modSend('mods:done', done);
+    return done;
+  } finally {
+    delete modCancels[taskId];
+  }
 });
 
 /* ---------------- 工具箱：任意链接下载（#9） ---------------- */
@@ -1040,15 +1148,21 @@ ipcMain.handle('version:targets', async (event, gameDir) => {
   const settings = cfg.versionSettings || {};
   const res = scanner.listVersions(gameDir);
   const versions = res.versions || [];
-  return versions.map((v) => {
-    const isolated = !!(settings[v.id] && settings[v.id].isolated);
-    return {
-      id: v.id,
-      isolated,
-      modsDir: instance.modsDirFor(gameDir, v.id, isolated),
-      hasJar: !!v.hasJar,
-    };
-  });
+  // 与版本管理页 / 启动页保持一致：隐藏「被加载器版本继承的父版本」
+  // （如 1.20.1 之于 fabric-loader-x-1.20.1）。它们只是加载器的依赖，不是可单独
+  // 启动 / 装模的独立版本；若作为模组安装位置列出，用户装到父版本后加载器版并不会加载。
+  const inheritedParents = new Set(versions.filter((v) => v.inheritsFrom).map((v) => v.inheritsFrom));
+  return versions
+    .filter((v) => !(!v.inheritsFrom && inheritedParents.has(v.id)))
+    .map((v) => {
+      const isolated = !!(settings[v.id] && settings[v.id].isolated);
+      return {
+        id: v.id,
+        isolated,
+        modsDir: instance.modsDirFor(gameDir, v.id, isolated),
+        hasJar: !!v.hasJar,
+      };
+    });
 });
 
 ipcMain.handle('version:detail', async (event, gameDir, versionId) => {
@@ -1404,6 +1518,209 @@ ipcMain.handle('log:recent', (event, gameDir) => {
   }
   logs.sort((a, b) => b.mtime - a.mtime);
   return { ok: true, logs: logs.slice(0, 3) };
+});
+
+/* ---------------- 反馈 / 上报（H 功能）：收集日志 + 创建 GitHub issue ---------------- */
+
+const FEEDBACK_REPO = 'wiuw3qde/minecraft-launcher';
+const GH_API = 'https://api.github.com';
+
+function crashDir() {
+  return path.join(app.getPath('userData'), 'crashes');
+}
+
+/** 收集崩溃 dump 列表（由全局崩溃处理器写入） */
+function listCrashDumps() {
+  try {
+    const dir = crashDir();
+    if (!fs.existsSync(dir)) return [];
+    return fs
+      .readdirSync(dir)
+      .filter((f) => /crash-.*\.json$/i.test(f))
+      .map((f) => {
+        try {
+          const d = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+          return { file: f, time: d.time, message: d.message, stack: d.stack };
+        } catch (e) {
+          return { file: f, time: '', message: '', stack: '' };
+        }
+      })
+      .sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+  } catch (e) {
+    return [];
+  }
+}
+
+function loadFeedbackToken() {
+  if (process.env.GH_TOKEN) return process.env.GH_TOKEN.trim();
+  const f = path.join(__dirname, '.github_token');
+  if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8').trim();
+  return '';
+}
+
+function ghPost(p, body, token) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = https.request(
+      GH_API + p,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'token ' + token,
+          'User-Agent': 'mc-launcher-feedback',
+          Accept: 'application/vnd.github+json',
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(data),
+        },
+      },
+      (res) => {
+        let buf = '';
+        res.on('data', (c) => (buf += c));
+        res.on('end', () => {
+          let json = null;
+          try { json = buf ? JSON.parse(buf) : null; } catch (e) { /* ignore */ }
+          if (res.statusCode >= 200 && res.statusCode < 300) resolve(json);
+          else reject(new Error('HTTP ' + res.statusCode + ' ' + (json && json.message ? json.message : buf.slice(0, 200))));
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+/** 截断过长内容，避免 issue 正文爆炸 */
+function clip(text, max) {
+  text = String(text || '');
+  if (text.length <= max) return text;
+  return text.slice(0, max) + `\n…（已截断，共 ${text.length} 字符）`;
+}
+
+ipcMain.handle('feedback:collect', (event, gameDir) => {
+  const logs = [];
+  const pushLog = (p) => {
+    try {
+      const st = fs.statSync(p);
+      logs.push({ name: path.basename(p), mtime: st.mtimeMs, size: st.size, content: fs.readFileSync(p, 'utf8') });
+    } catch (e) {
+      /* ignore */
+    }
+  };
+  if (gameDir) {
+    pushLog(path.join(gameDir, 'logs', 'latest.log'));
+    try {
+      fs.readdirSync(path.join(gameDir, 'crash-reports'))
+        .filter((f) => /\.txt$/i.test(f))
+        .sort((a, b) => b.localeCompare(a))
+        .slice(0, 3)
+        .forEach((f) => pushLog(path.join(gameDir, 'crash-reports', f)));
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  const appInfo = {
+    version: APP_VERSION,
+    platform: process.platform,
+    arch: process.arch,
+    osRelease: os.release(),
+    totalMemoryMB: Math.round(os.totalmem() / 1024 / 1024),
+  };
+  return {
+    ok: true,
+    app: appInfo,
+    gameDir: gameDir || '',
+    logs: logs.slice(0, 4),
+    crashReports: [],
+    launcherCrashes: listCrashDumps(),
+  };
+});
+
+ipcMain.handle('feedback:submit-issue', async (event, payload) => {
+  const token = loadFeedbackToken();
+  if (!token) return { ok: false, error: '未找到 GitHub 令牌（.github_token），无法自动创建 issue' };
+  const description = String(payload.description || '').trim() || '(用户未填写描述)';
+  const collected = payload.collected || {};
+  const app = collected.app || {};
+  const lines = [];
+  lines.push('## 描述');
+  lines.push(description);
+  lines.push('');
+  lines.push('## 环境');
+  lines.push(`- 启动器版本：${app.version || '?'}（${app.platform || '?'} ${app.arch || '?'} · ${app.osRelease || '?'} · 内存 ${app.totalMemoryMB || '?'}MB）`);
+  lines.push(`- 游戏目录：${collected.gameDir || '(未提供)'}`);
+  lines.push('');
+  const logs = collected.logs || [];
+  if (logs.length) {
+    lines.push('## 游戏 / 崩溃日志');
+    logs.forEach((l) => {
+      lines.push(`### ${l.name}（${l.size || 0} 字节）`);
+      lines.push('```');
+      lines.push(clip(l.content, 6000));
+      lines.push('```');
+    });
+    lines.push('');
+  }
+  const lcs = collected.launcherCrashes || [];
+  if (lcs.length) {
+    lines.push('## 启动器崩溃记录');
+    lcs.slice(0, 3).forEach((c) => {
+      lines.push(`### ${c.file} · ${c.time || ''}`);
+      if (c.message) lines.push(`- 信息：${c.message}`);
+      lines.push('```');
+      lines.push(clip(c.stack, 4000));
+      lines.push('```');
+    });
+    lines.push('');
+  }
+  lines.push('\n---\n由 MC 启动器内置「上报问题」自动生成');
+  const title = '用户反馈（v' + (app.version || '?') + '）：' + String(description || '').slice(0, 40);
+  try {
+    const issue = await ghPost(`/repos/${FEEDBACK_REPO}/issues`, { title: title.slice(0, 128), body: lines.join('\n') }, token);
+    return { ok: true, url: issue.html_url, number: issue.number };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('feedback:ack-crash', (event, files) => {
+  try {
+    const dir = crashDir();
+    (files || []).forEach((f) => {
+      const fp = path.join(dir, path.basename(f));
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+/* ---------------- 全局崩溃处理器：写 dump，下次启动弹窗提示上报 ---------------- */
+let crashGuard = false;
+function writeCrashDump(err) {
+  if (crashGuard) return;
+  crashGuard = true;
+  try {
+    const dir = crashDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const f = path.join(dir, 'crash-' + Date.now() + '.json');
+    fs.writeFileSync(
+      f,
+      JSON.stringify({ time: new Date().toISOString(), message: err && err.message, stack: err && err.stack, kind: 'uncaught' }, null, 2)
+    );
+  } catch (e) {
+    /* 写 dump 失败不影响其它逻辑 */
+  }
+}
+process.on('uncaughtException', (e) => {
+  writeCrashDump(e);
+  // 主进程致命异常：dump 已落盘，退出后下次启动会提示上报
+  setTimeout(() => process.exit(1), 50);
+});
+process.on('unhandledRejection', (e) => {
+  // 未处理的 Promise 拒绝：记录但不退出，尽量维持运行
+  writeCrashDump(e && e.stack ? e : new Error('unhandledRejection: ' + (e && (e.message || e))));
 });
 
 const TC_DIR = path.join(app.getPath('userData'), 'terracotta');

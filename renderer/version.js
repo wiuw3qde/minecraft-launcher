@@ -179,10 +179,14 @@
       <section class="card">
         <div class="row" style="justify-content:space-between;margin-bottom:8px">
           <h2 style="margin:0"><span class="h2num">2</span>模组管理 <span class="vm-count">${counts.enabledMods}/${counts.mods}</span></h2>
-          <button class="ghost small" data-act="refresh-mods">刷新</button>
+          <div class="row" style="margin:0">
+            <button class="ghost small" data-act="check-updates">检查更新</button>
+            <button class="ghost small" data-act="refresh-mods">刷新</button>
+          </div>
         </div>
         <p class="hint">模组目录：${esc(p.modsDir)}</p>
         <div class="vm-modlist" id="vmModList"></div>
+        <div class="vm-modupdates" id="vmModUpdates" hidden></div>
       </section>
 
       <section class="card">
@@ -243,6 +247,8 @@
     });
 
     detail.querySelector('[data-act="refresh-mods"]').addEventListener('click', () => loadMods(d));
+    const cu = detail.querySelector('[data-act="check-updates"]');
+    if (cu) cu.addEventListener('click', () => checkModUpdates(d));
     detail.querySelector('[data-act="refresh-worlds"]').addEventListener('click', () => loadWorlds(d));
     detail.querySelector('[data-act="refresh-rp"]').addEventListener('click', () => loadResourcepacks(d));
     detail.querySelector('[data-act="refresh-ss"]').addEventListener('click', () => loadScreenshots(d));
@@ -320,6 +326,89 @@
       });
       box.appendChild(row);
     });
+  }
+
+  /* ---------------- Mod 更新检测（A 功能） ---------------- */
+  let modUpdateListenersBound = false;
+  function ensureModUpdateListeners() {
+    if (modUpdateListenersBound) return;
+    modUpdateListenersBound = true;
+    if (typeof window.DLDock === 'undefined') return;
+    if (typeof window.launcher.onModsProgress === 'function') {
+      window.launcher.onModsProgress((p) => window.DLDock.progress(p.taskId, p));
+      window.launcher.onModsDone((r) => window.DLDock.done(r.taskId, r));
+      window.launcher.onModsLog((p) => window.DLDock.log(p.taskId, p.text));
+    }
+  }
+
+  async function checkModUpdates(d) {
+    ensureModUpdateListeners();
+    const box = el('vmModUpdates');
+    box.hidden = false;
+    box.innerHTML = '<div class="vm-mini-hint">正在对比 Modrinth 上的最新版本…（首次会逐个查询，请稍候）</div>';
+    const res = await window.launcher.modUpdates.check(gameDir, d.id);
+    if (!res.ok) { box.innerHTML = '<div class="vm-mini-hint">检查失败：' + esc(res.error) + '</div>'; return; }
+    renderModUpdates(d, res.results || []);
+  }
+
+  function renderModUpdates(d, rows) {
+    const box = el('vmModUpdates');
+    const updatable = rows.filter((r) => r.status === 'update');
+    const latest = rows.filter((r) => r.status === 'latest');
+    const unknown = rows.filter((r) => r.status === 'unknown');
+    if (!rows.length) { box.innerHTML = '<div class="vm-mini-hint">该版本没有可用于更新检测的模组（仅 .jar 模组参与检测）。</div>'; return; }
+    let html = '<div class="vm-upd-summary">更新检测：' +
+      '<span class="vm-upd-badge up">可更新 ' + updatable.length + '</span>' +
+      '<span class="vm-upd-badge ok">已最新 ' + latest.length + '</span>' +
+      '<span class="vm-upd-badge un">无法检测 ' + unknown.length + '</span></div>';
+    if (updatable.length) {
+      html += '<div class="vm-upd-list">';
+      updatable.forEach((r) => {
+        html += '<div class="vm-upd-row" data-name="' + esc(r.name) + '" data-slug="' + esc(r.slug || '') + '" data-pid="' + esc(r.projectId || r.slug || '') + '" data-vid="' + esc(r.latestVersionId || '') + '">' +
+          '<span class="vm-upd-name">' + esc(r.display) + '</span>' +
+          '<span class="vm-upd-ver">' + esc(r.installedVersion) + ' → <b>' + esc(r.latestVersion || '') + '</b></span>' +
+          (r.loaderMismatch ? '<span class="vm-upd-warn" title="该 mod 在此游戏版本下没有匹配当前加载器的构建，更新后可能无法加载">⚠ 加载器不符</span>' : '') +
+          '<button class="small primary vm-upd-btn">更新</button>' +
+          '</div>';
+      });
+      html += '</div>';
+    }
+    if (unknown.length) {
+      html += '<details class="vm-upd-unknown"><summary>无法检测更新源的模组（' + unknown.length + '，点开）</summary><div class="vm-upd-unknown-list">';
+      unknown.forEach((r) => {
+        html += '<div class="vm-upd-row un">' +
+          '<span class="vm-upd-name">' + esc(r.display) + '</span>' +
+          '<span class="vm-upd-ver">已装 ' + esc(r.installedVersion) + '</span>' +
+          '<span class="vm-upd-hint">未在 Modrinth 找到来源</span></div>';
+      });
+      html += '</div></details>';
+    }
+    box.innerHTML = html;
+    box.querySelectorAll('.vm-upd-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const row = btn.closest('.vm-upd-row');
+        doUpdateMod(d, {
+          name: row.getAttribute('data-name'),
+          slug: row.getAttribute('data-slug'),
+          projectId: row.getAttribute('data-pid'),
+          mrVersionId: row.getAttribute('data-vid'),
+        });
+      });
+    });
+  }
+
+  function doUpdateMod(d, info) {
+    ensureModUpdateListeners();
+    if (!window.DLDock) { alert('下载面板未就绪'); return; }
+    const taskId = 'upd' + Date.now() + Math.random().toString(16).slice(2);
+    window.DLDock.add({ taskId, title: '更新 ' + (info.slug || 'mod'), cancel: () => window.launcher.mods.cancel(taskId) });
+    window.launcher.modUpdates
+      .update({ taskId, gameDir, versionId: d.id, modName: info.name, projectId: info.projectId || info.slug, mrVersionId: info.mrVersionId })
+      .then((r) => {
+        if (r && r.ok) { loadMods(d); checkModUpdates(d); }
+        else if (r && !r.ok && !r.cancelled) { alert('更新失败：' + (r.error || '未知错误')); }
+      })
+      .catch((e) => alert('更新出错：' + e.message));
   }
 
   /* ---------------- 世界 ---------------- */

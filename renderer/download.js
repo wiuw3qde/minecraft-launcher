@@ -407,5 +407,10 @@
     gotoStep(1);
   }
 
-  init().catch((e) => dlog('[错误] 初始化失败：' + e.message));
+  // init() 本身是同步函数（内部异步工作自己起 async IIFE），不能直接 .catch
+  try {
+    init();
+  } catch (e) {
+    dlog('[错误] 初始化失败：' + e.message);
+  }
 })();

@@ -1315,6 +1315,23 @@ pre {
   margin-top: 10px;
 }
 
+/* ===== Mod 更新检测（A 功能） ===== */
+.vm-modupdates { margin-top: 12px; }
+.vm-upd-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.vm-upd-badge { font-size: 12px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.vm-upd-badge.up { color: var(--accent); border-color: var(--accent-glow); }
+.vm-upd-badge.ok { color: #3fb950; }
+.vm-upd-list { display: flex; flex-direction: column; gap: 6px; }
+.vm-upd-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.vm-upd-row.un { opacity: 0.7; }
+.vm-upd-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vm-upd-ver { font-size: 12px; color: var(--muted); }
+.vm-upd-warn { font-size: 12px; color: #d29922; }
+.vm-upd-hint { font-size: 12px; color: var(--muted); }
+.vm-upd-unknown { margin-top: 8px; font-size: 13px; }
+.vm-upd-unknown summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
+.vm-upd-unknown-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+
 .vm-mod,
 .vm-world,
 .vm-rp {
@@ -2099,6 +2116,30 @@ pre {
   --accent-glow: rgba(255, 169, 77, 0.35);
   --accent-soft: rgba(255, 169, 77, 0.12);
 }
+
+/* ===== 反馈 / 上报（H 功能） ===== */
+#fbModal .fb-panel { max-width: 640px; }
+.fb-priv { color: var(--muted); margin: 0 0 12px; }
+.fb-desc-field { display: block; margin-bottom: 14px; }
+.fb-desc { width: 100%; min-height: 110px; resize: vertical; padding: 10px; border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); font: inherit; box-sizing: border-box; }
+.fb-summary { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; font-size: 13px; }
+.fb-summ-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin-bottom: 10px; }
+.fb-summ-logs ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+.fb-crash-note { margin-top: 10px; color: #d29922; }
+.fb-result { margin-top: 12px; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13px; }
+.fb-result.ok { background: rgba(63, 185, 80, 0.12); border: 1px solid rgba(63, 185, 80, 0.4); color: var(--text); }
+.fb-result.ok a { color: var(--accent); word-break: break-all; }
+.fb-result.bad { background: rgba(248, 81, 73, 0.12); border: 1px solid rgba(248, 81, 73, 0.4); color: var(--text); }
+.fb-result-actions { margin-top: 8px; display: flex; gap: 8px; }
+.md-foot { display: flex; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--border); }
+.md-foot .primary, .md-foot .ghost { flex: 0 0 auto; }
+
+.crash-banner { display: flex; align-items: center; gap: 12px; padding: 12px 16px; margin-bottom: 14px;
+  background: rgba(210, 153, 34, 0.12); border: 1px solid rgba(210, 153, 34, 0.45); border-radius: var(--radius-sm); }
+.crash-banner[hidden] { display: none; }
+.crash-ico { font-size: 18px; color: #d29922; }
+.crash-text { flex: 1; font-size: 13px; color: var(--text); }
 
 /* 设置页 / 工具箱通用 */
 .theme-chips { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 4px; }

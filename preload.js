@@ -71,12 +71,16 @@ const api = {
     onLog: (cb) => ipcRenderer.on('terracotta:log', (e, p) => cb(p)),
     onDone: (cb) => ipcRenderer.on('terracotta:done', (e, p) => cb(p)),
   },
-  mods: {
+    mods: {
     filters: () => ipcRenderer.invoke('mods:filters'),
     search: (opts) => ipcRenderer.invoke('mods:search', opts),
     detail: (projectId) => ipcRenderer.invoke('mods:detail', projectId),
     download: (opts) => ipcRenderer.invoke('mods:download', opts),
     cancel: (taskId) => ipcRenderer.invoke('mods:cancel', taskId),
+  },
+  modUpdates: {
+    check: (gameDir, versionId) => ipcRenderer.invoke('version:mods-check-updates', gameDir, versionId),
+    update: (opts) => ipcRenderer.invoke('version:mods-update', opts),
   },
   version: {
     settings: () => ipcRenderer.invoke('version:settings'),
@@ -146,6 +150,12 @@ const api = {
     diagnose: (text) => ipcRenderer.invoke('log:diagnose', text),
     recent: (gameDir) => ipcRenderer.invoke('log:recent', gameDir),
   },
+  feedback: {
+    collect: (gameDir) => ipcRenderer.invoke('feedback:collect', gameDir),
+    submitIssue: (payload) => ipcRenderer.invoke('feedback:submit-issue', payload),
+    ackCrash: (files) => ipcRenderer.invoke('feedback:ack-crash', files),
+  },
+  onCrashDetected: (cb) => ipcRenderer.on('app:crash-detected', (e, dumps) => cb(dumps)),
   updater: {
     onStatus: (cb) => ipcRenderer.on('updater:status', (e, p) => cb(p)),
     info: () => ipcRenderer.invoke('updater:info'),
