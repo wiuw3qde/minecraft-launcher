@@ -149,8 +149,13 @@ function buildChangelog() {
     console.error('[publish] 找不到 dist/ 目录，请先运行 npm run dist 打包。');
     process.exit(1);
   }
-  // 待上传资产：latest.yml + 所有 exe
-  const assets = fs.readdirSync(distDir).filter((f) => /^(latest\.yml|\.exe)$/i.test(f))
+  // 待上传资产：latest.yml + 仅当前版本的安装包与便携版
+  // （避免历史版本 exe 反复堆积在单个 Release 里，保持每个 Release 自包含）
+  const assets = fs.readdirSync(distDir)
+    .filter((f) => {
+      if (f === 'latest.yml') return true;
+      return /\.exe$/i.test(f) && f.includes(VERSION);
+    })
     .map((f) => path.join(distDir, f));
   if (!assets.length) {
     console.error('[publish] dist/ 内没有可上传的 exe / latest.yml。');

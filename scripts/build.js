@@ -171,7 +171,8 @@ function genLatestYml() {
   const distDir = path.join(root, 'dist');
   let exes = [];
   try {
-    exes = fs.readdirSync(distDir).filter((f) => /\.exe$/i.test(f));
+    // 只把当前版本的安装包/便携版写进更新清单，避免历史版本堆积导致 latest.yml 膨胀
+    exes = fs.readdirSync(distDir).filter((f) => /\.exe$/i.test(f) && f.includes(VERSION));
   } catch (e) {
     return;
   }
