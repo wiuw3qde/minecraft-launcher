@@ -20,6 +20,9 @@ const { execSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const API = 'https://api.github.com';
+// GitHub 的 Release 资源（创建/读取）走 api.github.com，
+// 但「上传资产」必须走独立主机 uploads.github.com，用 api 域会上传 404。
+const UPLOAD_API = 'https://uploads.github.com';
 
 // ---------- 参数 / 配置 ----------
 const args = process.argv.slice(2);
@@ -92,7 +95,7 @@ function uploadAsset(releaseId, filePath) {
     const name = path.basename(filePath);
     const stat = fs.statSync(filePath);
     const req = https.request(
-      API + `/repos/${OWNER}/${REPO_NAME}/releases/${releaseId}/assets?name=${encodeURIComponent(name)}`,
+      UPLOAD_API + `/repos/${OWNER}/${REPO_NAME}/releases/${releaseId}/assets?name=${encodeURIComponent(name)}`,
       {
         method: 'POST',
         headers: {
@@ -121,11 +124,11 @@ function uploadAsset(releaseId, filePath) {
 // ---------- 更新日志（git 提交历史） ----------
 function buildChangelog() {
   let lastTag = '';
-  try { lastTag = execSync('git describe --tags --abbrev=0', { cwd: ROOT }).toString().trim(); } catch (e) { lastTag = ''; }
+  try { lastTag = execSync('git describe --tags --abbrev=0', { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch (e) { lastTag = ''; }
   const range = lastTag ? `${lastTag}..HEAD` : 'HEAD';
   let log = '';
   try {
-    log = execSync(`git log ${range} --pretty=format:"- %s (%h)"`, { cwd: ROOT }).toString().trim();
+    log = execSync(`git log ${range} --pretty=format:"- %s (%h)"`, { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
   } catch (e) { log = ''; }
   // 过滤掉纯版本号自增 / chore 类噪声提交
   const lines = log
