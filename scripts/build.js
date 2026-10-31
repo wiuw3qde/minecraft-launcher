@@ -199,16 +199,19 @@ function genLatestYml() {
     .sort((a, b) => b.size - a.size);
   const primary = items[0];
   const releaseDate = new Date().toISOString();
-  let yml = 'version: ' + VERSION + '\n';
-  yml += "releaseDate: '" + releaseDate + "'\n";
-  yml += 'files:\n';
+  // 用「行数组 + join('\n')」构造 YAML，避免字符串拼接里 \n 被误解成字面量 /n（曾导致 latest.yml 解析失败）
+  const lines = [];
+  lines.push('version: ' + VERSION);
+  lines.push("releaseDate: '" + releaseDate + "'");
+  lines.push('files:');
   items.forEach((x) => {
-    yml += "  - url: '" + asciiName(x.file) + "'\n";
-    yml += '    sha512: ' + x.sha512 + '\n';
-    yml += '    size: ' + x.size + '\n';
+    lines.push("  - url: '" + asciiName(x.file) + "'");
+    lines.push('    sha512: ' + x.sha512);
+    lines.push('    size: ' + x.size);
   });
-  yml += "path: '" + asciiName(primary.file) + "'\n";
-  yml += 'sha512: ' + primary.sha512 + '\n';
+  lines.push("path: '" + asciiName(primary.file) + "'");
+  lines.push('sha512: ' + primary.sha512);
+  const yml = lines.join('\n') + '\n';
   fs.writeFileSync(path.join(distDir, 'latest.yml'), yml, 'utf8');
   console.log('[build] 已生成 latest.yml（更新清单，主文件 ' + primary.file + '）');
 }
