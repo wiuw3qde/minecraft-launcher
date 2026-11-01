@@ -288,12 +288,22 @@
         r.addEventListener('change', function () { if (r.checked) persist({ scope: r.value }); });
       });
       var box = $('bkTargets');
-      if (box && cfg.gameDir) {
-        window.launcher.versions.list(cfg.gameDir).then(function (list) {
-          if (!box || !box.parentNode) return;
-          if (!list || !list.length) { box.innerHTML = '<span class="hint">没有可用版本</span>'; return; }
-          box.innerHTML = '';
-          list.forEach(function (v) {
+      if (box) {
+        // 游戏目录真相源：launcherUI 实时值 → 配置(cfg.gameDir) → 输入框（与版本管理页一致）
+        var gd = '';
+        try { gd = (window.launcherUI && window.launcherUI.gameDir) ? window.launcherUI.gameDir() : ''; } catch (e) { gd = ''; }
+        if (!gd && cfg.gameDir) gd = cfg.gameDir;
+        if (!gd) { var gi = document.getElementById('gameDir'); if (gi) gd = (gi.value || '').trim(); }
+        if (!gd) {
+          box.innerHTML = '<span class="hint">请先在「启动游戏」页选择游戏目录</span>';
+        } else {
+          // 注意：versions.list 返回的是 { versions: [...] } 对象，不是数组
+          window.launcher.versions.list(gd).then(function (res) {
+            if (!box || !box.parentNode) return;
+            var list = (res && res.versions) || [];
+            if (!list.length) { box.innerHTML = '<span class="hint">没有可用版本</span>'; return; }
+            box.innerHTML = '';
+            list.forEach(function (v) {
             var id = v && v.id ? v.id : v;
             var cb = document.createElement('label');
             cb.className = 'checkbox';
@@ -306,7 +316,8 @@
             });
             box.appendChild(cb);
           });
-        }).catch(function () { if (box) box.innerHTML = '<span class="hint">版本列表加载失败</span>'; });
+          }).catch(function () { if (box) box.innerHTML = '<span class="hint">版本列表加载失败</span>'; });
+        }
       }
       var run = $('bkRunNow');
       if (run) run.addEventListener('click', function () {
