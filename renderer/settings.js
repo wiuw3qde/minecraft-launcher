@@ -160,6 +160,8 @@
     var accent = cfg.accent || '#3ddc84';
     var title = cfg.launcherTitle || 'MC 启动器';
     var egg = !!cfg.easterEgg;
+    var bk = cfg.backup || { enabled: false, intervalDays: 7, keep: 5, scope: 'world', targets: [] };
+    var bkTargets = bk.targets || [];
 
     var chips = THEMES.map(function (t) {
       return '<button class="theme-chip' + (t.id === theme ? ' active' : '') + '" data-theme="' + t.id + '">' +
@@ -191,7 +193,18 @@
       '<span class="hint" id="updStatus">未检查</span></div>' +
       '<div class="row" style="margin-top:10px"><button class="primary" id="btnCheckUpdate">立即检查更新</button>' +
       '<button class="primary" id="btnDoUpdate" hidden>下载并安装更新</button></div>' +
-      '<p class="hint">发布方法：跑 <code>npm run ship</code>（打包并自动上传到 GitHub Release + 写入更新日志）。Release 页面即更新日志。</p></section>';
+      '<p class="hint">发布方法：跑 <code>npm run ship</code>（打包并自动上传到 GitHub Release + 写入更新日志）。Release 页面即更新日志。</p></section>' +
+      '<section class="card"><h2><span class="h2num">5</span>自动备份世界</h2>' +
+      '<div class="callout-info">启动器启动时按间隔自动备份选定版本的世界（或整版本快照），防止丢档。默认关闭，与手动「备份导出」相互独立。</div>' +
+      '<div class="field-row" style="margin-top:10px"><label class="switch inline"><input type="checkbox" id="bkEnable"' + (bk.enabled ? ' checked' : '') + ' /><span>启用自动备份</span></label></div>' +
+      '<div class="field-row"><label class="lbl">间隔（天）</label><input type="number" id="bkInterval" min="1" max="365" value="' + (bk.intervalDays || 7) + '" class="num small" /></div>' +
+      '<div class="field-row"><label class="lbl">保留份数</label><input type="number" id="bkKeep" min="1" max="99" value="' + (bk.keep || 5) + '" class="num small" /></div>' +
+      '<div class="field-row"><label class="lbl">备份范围</label>' +
+      '<label class="radio"><input type="radio" name="bkScope" value="world"' + (bk.scope !== 'version' ? ' checked' : '') + '/>仅世界</label>' +
+      '<label class="radio"><input type="radio" name="bkScope" value="version"' + (bk.scope === 'version' ? ' checked' : '') + '/>整个版本</label></div>' +
+      '<div class="field-row col"><label class="lbl">纳入自动备份的版本</label><div id="bkTargets" class="bk-targets"><span class="hint">加载中…</span></div></div>' +
+      '<div class="row" style="margin-top:10px"><button class="primary" id="bkRunNow">立即备份一次</button><span class="hint" id="bkRunMsg"></span></div>' +
+      '</section>';
 
     // 主题切换
     tab.querySelectorAll('.theme-chip[data-theme]').forEach(function (btn) {
@@ -261,6 +274,56 @@
     }).catch(function () {});
     // 打开设置页即主动检查一次
     doCheckUpdate();
+
+    // 自动备份（#13）配置区块
+    (function bindBackupSettings() {
+      function persist(patch) { bk = Object.assign({}, bk, patch); save({ backup: bk }); }
+      var en = $('bkEnable');
+      if (en) en.addEventListener('change', function () { persist({ enabled: en.checked }); });
+      var iv = $('bkInterval');
+      if (iv) iv.addEventListener('change', function () { var v = parseInt(iv.value, 10); if (v > 0) persist({ intervalDays: v }); });
+      var kp = $('bkKeep');
+      if (kp) kp.addEventListener('change', function () { var v = parseInt(kp.value, 10); if (v > 0) persist({ keep: v }); });
+      tab.querySelectorAll('input[name="bkScope"]').forEach(function (r) {
+        r.addEventListener('change', function () { if (r.checked) persist({ scope: r.value }); });
+      });
+      var box = $('bkTargets');
+      if (box && cfg.gameDir) {
+        window.launcher.versions.list(cfg.gameDir).then(function (list) {
+          if (!box || !box.parentNode) return;
+          if (!list || !list.length) { box.innerHTML = '<span class="hint">没有可用版本</span>'; return; }
+          box.innerHTML = '';
+          list.forEach(function (v) {
+            var id = v && v.id ? v.id : v;
+            var cb = document.createElement('label');
+            cb.className = 'checkbox';
+            cb.innerHTML = '<input type="checkbox" value="' + esc(id) + '"' + (bkTargets.indexOf(id) >= 0 ? ' checked' : '') + '/><span>' + esc(id) + '</span>';
+            cb.querySelector('input').addEventListener('change', function (e) {
+              var arr = bkTargets.slice();
+              if (e.target.checked) { if (arr.indexOf(id) < 0) arr.push(id); }
+              else arr = arr.filter(function (x) { return x !== id; });
+              bkTargets = arr; persist({ targets: arr });
+            });
+            box.appendChild(cb);
+          });
+        }).catch(function () { if (box) box.innerHTML = '<span class="hint">版本列表加载失败</span>'; });
+      }
+      var run = $('bkRunNow');
+      if (run) run.addEventListener('click', function () {
+        var msg = $('bkRunMsg');
+        if (!bk.enabled && !confirm('自动备份尚未启用，确定立即手动备份一次？')) return;
+        run.disabled = true; run.textContent = '备份中…'; if (msg) msg.textContent = '';
+        window.launcher.version.backupRunNow().then(function (r) {
+          run.disabled = false; run.textContent = '立即备份一次';
+          if (!msg) return;
+          if (r && r.ok && r.versionCount) msg.textContent = '已备份 ' + r.versionCount + ' 个版本' + (r.errors && r.errors.length ? ('，' + r.errors.length + ' 个出错') : '');
+          else if (r && r.skipped === 'disabled') msg.textContent = '未启用自动备份';
+          else if (r && r.skipped === 'not-due') msg.textContent = '尚未到间隔，已跳过';
+          else if (r && !r.ok) msg.textContent = '失败：' + (r.error || '');
+          else msg.textContent = '无需备份';
+        }).catch(function (e) { run.disabled = false; run.textContent = '立即备份一次'; if (msg) msg.textContent = '异常：' + (e && e.message || ''); });
+      });
+    })();
 
     rendered = true;
   }

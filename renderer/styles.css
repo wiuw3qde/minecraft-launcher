@@ -2237,3 +2237,17 @@ textarea.grow { width: 100%; box-sizing: border-box; resize: vertical; backgroun
 .egg-confetti i { position: absolute; top: -20px; width: 8px; height: 14px; opacity: .9; animation: eggFall linear forwards; }
 @keyframes eggFall { to { transform: translateY(110vh) rotate(720deg); } }
 .egg-fake { position: fixed; inset: 0; z-index: 9997; pointer-events: none; }
+
+/* 自动备份（#13） */
+.callout-info { border: 1px solid var(--accent); background: var(--accent-soft, rgba(61,220,132,.08)); color: var(--text); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+.field-row.col { flex-direction: column; align-items: flex-start; gap: 8px; }
+.field-row .lbl { font-size: 13px; color: var(--text-dim); min-width: 72px; }
+.radio, .checkbox { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; margin-right: 14px; }
+.num.small { width: 84px; }
+.bk-targets { display: flex; flex-wrap: wrap; gap: 8px 16px; max-height: 180px; overflow: auto; padding: 6px 0; }
+.bk-targets .checkbox { margin-right: 0; }
+.vm-bklist { display: flex; flex-direction: column; gap: 8px; }
+.vm-bk { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.vm-bk-main { display: flex; flex-direction: column; gap: 2px; }
+.vm-bk-name { font-weight: 600; font-size: 13px; }
+.vm-bk-sub { font-size: 12px; color: var(--text-dim); }

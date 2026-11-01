@@ -510,6 +510,95 @@ function backupWorld(savesDir, folder) {
   return { ok: true, dest: outZip };
 }
 
+/* ============ 自动备份（按间隔，专属目录 backups/auto/<版本id>/） ============ */
+function autoBackupRoot(gameDir) {
+  return path.join(gameDir, 'backups', 'auto');
+}
+function autoVersionDir(gameDir, versionId) {
+  return path.join(autoBackupRoot(gameDir), versionId);
+}
+function parseTs(name) {
+  const m = /(\d{8}-\d{6})\.zip$/i.exec(name || '');
+  return m ? m[1] : '';
+}
+// 执行一次自动备份；scope='version' 整版本快照，否则逐个世界打包
+function autoBackup(gameDir, versionId, isolated, scope) {
+  const root = autoVersionDir(gameDir, versionId);
+  const results = [];
+  if (scope === 'version') {
+    const versionDir = path.join(gameDir, 'versions', versionId);
+    const instanceDir = instanceDirFor(gameDir, versionId);
+    const entries = [];
+    if (fs.existsSync(versionDir)) collectDirEntries(versionDir, versionId, entries);
+    if (fs.existsSync(instanceDir)) collectDirEntries(instanceDir, versionId + '-data', entries);
+    if (!entries.length) return { ok: false, error: '没有可备份的内容（版本或实例目录为空）' };
+    const outZip = path.join(root, 'version-' + timestamp() + '.zip');
+    zipWrite(entries, outZip);
+    return { ok: true, results: [{ ok: true, dest: outZip, scope: 'version' }] };
+  }
+  const savesDir = savesDirFor(gameDir, versionId, isolated);
+  const worlds = listWorlds(savesDir);
+  if (!worlds.length) return { ok: false, error: '该版本没有世界' };
+  const worldOut = path.join(root, 'worlds');
+  for (const w of worlds) {
+    const worldDir = path.join(savesDir, w.folder);
+    const outZip = path.join(worldOut, w.folder + '-' + timestamp() + '.zip');
+    try {
+      zipFolder(worldDir, outZip);
+      results.push({ ok: true, dest: outZip, scope: 'world', folder: w.folder });
+    } catch (e) {
+      results.push({ ok: false, error: e.message, folder: w.folder });
+    }
+  }
+  return { ok: results.some((r) => r.ok), results };
+}
+// 列出某版本自动备份：{ worlds:[{path,file,ts,size,folder}], versions:[{path,file,ts,size}] }
+function listAutoBackups(gameDir, versionId) {
+  const root = autoVersionDir(gameDir, versionId);
+  const out = { worlds: [], versions: [] };
+  const worldDir = path.join(root, 'worlds');
+  if (fs.existsSync(worldDir)) {
+    for (const f of fs.readdirSync(worldDir)) {
+      if (!/\.zip$/i.test(f)) continue;
+      let st; try { st = fs.statSync(path.join(worldDir, f)); } catch (e) { continue; }
+      const folder = f.replace(/-\d{8}-\d{6}\.zip$/i, '').replace(/\.zip$/i, '');
+      out.worlds.push({ path: path.join(worldDir, f), file: f, ts: parseTs(f), size: st.size, folder });
+    }
+  }
+  if (fs.existsSync(root)) {
+    for (const f of fs.readdirSync(root)) {
+      if (!/^version-\d{8}-\d{6}\.zip$/i.test(f)) continue;
+      let st; try { st = fs.statSync(path.join(root, f)); } catch (e) { continue; }
+      out.versions.push({ path: path.join(root, f), file: f, ts: parseTs(f), size: st.size });
+    }
+  }
+  out.worlds.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
+  out.versions.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
+  return out;
+}
+// 删除超过 keep 份的旧备份（按时间戳降序，保留最新 keep 份）
+function pruneAutoBackups(gameDir, versionId, scope, keep) {
+  const root = autoVersionDir(gameDir, versionId);
+  const targets = [];
+  const vFiles = fs.existsSync(root)
+    ? fs.readdirSync(root).filter((f) => /^version-\d{8}-\d{6}\.zip$/i.test(f))
+    : [];
+  const wFiles = fs.existsSync(path.join(root, 'worlds'))
+    ? fs.readdirSync(path.join(root, 'worlds')).filter((f) => /\.zip$/i.test(f))
+    : [];
+  if (scope === 'version' || !scope) {
+    vFiles.map((f) => ({ f, ts: parseTs(f) })).sort((a, b) => b.ts.localeCompare(a.ts))
+      .slice(keep).forEach((x) => targets.push(path.join(root, x.f)));
+  }
+  if (scope === 'world' || !scope) {
+    wFiles.map((f) => ({ f, ts: parseTs(f) })).sort((a, b) => b.ts.localeCompare(a.ts))
+      .slice(keep).forEach((x) => targets.push(path.join(root, 'worlds', x.f)));
+  }
+  let removed = 0;
+  for (const t of targets) { try { fs.unlinkSync(t); removed++; } catch (e) { /* ignore */ } }
+  return { ok: true, removed };
+}
+
 /* ============ 删除版本 ============ */
 
 function deleteVersion(gameDir, versionId) {
@@ -570,6 +659,9 @@ module.exports = {
   listScreenshots,
   backupVersion,
   backupWorld,
+  autoBackup,
+  listAutoBackups,
+  pruneAutoBackups,
   deleteVersion,
   detail,
 };

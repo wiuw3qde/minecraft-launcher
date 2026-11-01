@@ -102,6 +102,9 @@ const api = {
     ssDelete: (gameDir, versionId, name) => ipcRenderer.invoke('version:ss-delete', gameDir, versionId, name),
     backup: (gameDir, versionId) => ipcRenderer.invoke('version:backup', gameDir, versionId),
     delete: (gameDir, versionId) => ipcRenderer.invoke('version:delete', gameDir, versionId),
+    backupsList: (gameDir, versionId) => ipcRenderer.invoke('version:backups-list', gameDir, versionId),
+    backupRestore: (gameDir, versionId, opts) => ipcRenderer.invoke('version:backup-restore', gameDir, versionId, opts),
+    backupRunNow: () => ipcRenderer.invoke('backup:run-now'),
   },
   window: {
     minimize: () => ipcRenderer.invoke('win:minimize'),

@@ -216,6 +216,15 @@
         <div class="vm-ssgrid" id="vmSsGrid"></div>
       </section>
 
+      <section class="card">
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <h2 style="margin:0"><span class="h2num">6</span>备份与恢复</h2>
+          <button class="ghost small" data-act="refresh-bk">刷新</button>
+        </div>
+        <p class="hint">自动备份（设置页开启）的版本快照与单世界备份，可一键恢复到「覆盖原位置」或「新建副本」。</p>
+        <div class="vm-bklist" id="vmBkList">加载中…</div>
+      </section>
+
       <section class="card vm-danger">
         <h2><span class="h2num">!</span>危险操作</h2>
         <div class="row">
@@ -230,6 +239,7 @@
     // 加载列表型数据
     loadMods(d);
     loadWorlds(d);
+    loadBackups(d);
     loadResourcepacks(d);
     loadScreenshots(d);
   }
@@ -254,6 +264,8 @@
     detail.querySelector('[data-act="refresh-ss"]').addEventListener('click', () => loadScreenshots(d));
 
     detail.querySelector('[data-act="backup"]').addEventListener('click', () => doBackup(d));
+    const rb = detail.querySelector('[data-act="refresh-bk"]');
+    if (rb) rb.addEventListener('click', () => loadBackups(d));
     detail.querySelector('[data-act="delete-version"]').addEventListener('click', () => doDelete(d));
   }
 
@@ -448,6 +460,45 @@
       });
       box.appendChild(row);
     });
+  }
+
+  /* ---------------- 备份与恢复（#13） ---------------- */
+  async function loadBackups(d) {
+    const box = el('vmBkList');
+    box.innerHTML = '<div class="vm-mini-hint">加载中…</div>';
+    const res = await window.launcher.version.backupsList(gameDir, d.id);
+    if (!res.ok) { box.innerHTML = '<div class="vm-mini-hint">加载失败：' + esc(res.error) + '</div>'; return; }
+    const worlds = res.worlds || [];
+    const versions = res.versions || [];
+    if (!worlds.length && !versions.length) { box.innerHTML = '<div class="vm-mini-hint">还没有自动备份。可在设置页开启「自动备份世界」并勾选本版本。</div>'; return; }
+    box.innerHTML = '';
+    worlds.forEach((b) => box.appendChild(bkRow(d, b, 'world')));
+    versions.forEach((b) => box.appendChild(bkRow(d, b, 'version')));
+  }
+  function bkRow(d, b, scope) {
+    const row = document.createElement('div');
+    row.className = 'vm-bk';
+    const label = scope === 'version' ? '整版本快照' : ('世界「' + esc(b.folder) + '」');
+    row.innerHTML =
+      '<div class="vm-bk-main"><span class="vm-bk-name">' + label + '</span>' +
+      '<span class="vm-bk-sub">' + (b.ts || '未知时间') + ' · ' + fmtSize(b.size) + '</span></div>' +
+      '<span class="vm-mod-acts"><button class="small primary" data-restore>恢复</button></span>';
+    row.querySelector('[data-restore]').addEventListener('click', () => doRestore(d, b, scope));
+    return row;
+  }
+  async function doRestore(d, b, scope) {
+    if (scope === 'version') {
+      if (!confirm('即将用整版本快照覆盖恢复「' + d.id + '」，可能替换 mods/config/saves，不可撤销。继续？')) return;
+      const r = await window.launcher.version.backupRestore(gameDir, d.id, { zipPath: b.path, mode: 'overwrite', scope, folder: b.folder });
+      if (r.ok) alert('恢复完成：' + r.dest);
+      else alert('恢复失败：' + r.error);
+      return;
+    }
+    const copy = !confirm('恢复世界「' + b.folder + '」：\n确定＝覆盖原位置（替换现有）；取消＝恢复到新建副本（不影响现有）');
+    if (!copy && !confirm('覆盖会直接用备份替换现有世界「' + b.folder + '」，不可撤销。仍要覆盖？')) return;
+    const r = await window.launcher.version.backupRestore(gameDir, d.id, { zipPath: b.path, mode: copy ? 'copy' : 'overwrite', scope, folder: b.folder });
+    if (r.ok) alert('恢复完成：' + r.dest);
+    else alert('恢复失败：' + r.error);
   }
 
   /* ---------------- 资源包 ---------------- */

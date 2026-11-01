@@ -1,7 +1,7 @@
 {
   "name": "mc-launcher",
   "productName": "MC 启动器",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Minecraft Java 版启动器（本地识别 + 离线/正版登录 + 下载安装 + 启动）",
   "main": "main.js",
   "scripts": {

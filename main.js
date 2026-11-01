@@ -25,6 +25,7 @@ const logDiagnose = require('./src/log-diagnose');
 const instance = require('./src/instance');
 const modpack = require('./src/modpack');
 const javadl = require('./src/javadl');
+const zip = require('./src/zip');
 const modupdate = require('./src/modupdate');
 const { autoUpdater } = require('electron-updater');
 
@@ -75,6 +76,74 @@ function writeConfig(cfg) {
   } catch (e) {
     return false;
   }
+}
+
+/* ---------------- 自动备份（#13）配置默认与合并 ---------------- */
+function defaultBackup() {
+  return { enabled: false, intervalDays: 7, keep: 5, scope: 'world', targets: [], lastRun: 0 };
+}
+/** 合并/校正 backup 配置，保证所有字段类型正确、scope 合法 */
+function mergeBackup(cfg) {
+  const d = defaultBackup();
+  const b = (cfg && cfg.backup) || {};
+  const scope = b.scope === 'version' ? 'version' : 'world';
+  const targets = Array.isArray(b.targets) ? b.targets.filter((x) => typeof x === 'string') : [];
+  return {
+    enabled: !!b.enabled,
+    intervalDays: Number.isFinite(b.intervalDays) ? b.intervalDays : d.intervalDays,
+    keep: Number.isFinite(b.keep) ? b.keep : d.keep,
+    scope,
+    targets,
+    lastRun: Number.isFinite(b.lastRun) ? b.lastRun : 0,
+  };
+}
+function bkStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+/** 执行一次自动备份（force=true 时忽略间隔立即执行）。返回摘要。 */
+async function runAutoBackup(opts) {
+  opts = opts || {};
+  const cfg = readConfig();
+  const b = mergeBackup(cfg);
+  if (!b.enabled) return { ok: true, skipped: 'disabled' };
+  const due = b.lastRun && Date.now() - b.lastRun < b.intervalDays * 86400000;
+  if (!opts.force && due) return { ok: true, skipped: 'not-due' };
+  const gameDir = cfg.gameDir || scanner.defaultGameDir();
+  const summary = { ok: true, versionCount: 0, backups: [], errors: [] };
+  for (const versionId of b.targets) {
+    const settings = cfg.versionSettings || {};
+    const isolated = !!(settings[versionId] && settings[versionId].isolated);
+    try {
+      const r = instance.autoBackup(gameDir, versionId, isolated, b.scope);
+      if (r.ok) {
+        summary.versionCount++;
+        (r.results || []).forEach((x) => summary.backups.push(versionId + (x.folder ? '/' + x.folder : '') + (x.scope === 'version' ? ' (整版本)' : '')));
+        instance.pruneAutoBackups(gameDir, versionId, b.scope, b.keep);
+      } else {
+        summary.errors.push(versionId + ': ' + (r.error || '失败'));
+      }
+    } catch (e) {
+      summary.errors.push(versionId + ': ' + e.message);
+    }
+  }
+  // 更新 lastRun（保留其他配置字段）
+  const stored = readConfig();
+  stored.backup = Object.assign(mergeBackup(stored), { lastRun: Date.now() });
+  writeConfig(stored);
+  summary.lastRun = stored.backup.lastRun;
+  return summary;
+}
+/** 启动后延迟调度自动备份，绝不阻塞启动 */
+function scheduleAutoBackup() {
+  setTimeout(() => {
+    runAutoBackup().then((summary) => {
+      if (win && !win.isDestroyed() && summary && summary.versionCount) {
+        win.webContents.send('backup:auto-result', summary);
+      }
+    }).catch((e) => console.error('[backup] 自动备份异常', e.message));
+  }, 5000);
 }
 
 /** 依据物理内存自动给出合理的 JVM 堆上限（MB）。
@@ -188,6 +257,8 @@ app.whenReady().then(() => {
     javaFinder.addJavaRoot(path.join(app.getPath('userData'), 'runtime'));
   } catch (e) { /* ignore */ }
   createWindow();
+  // 自动备份（#13）：启动后延迟执行，按间隔备份目标版本，绝不阻塞启动
+  scheduleAutoBackup();
   // 自动更新：打包后启动 3 秒后静默检查一次
   initUpdater();
   if (app.isPackaged) {
@@ -297,6 +368,7 @@ ipcMain.handle('config:get', () => {
   if (cfg.easterEgg === undefined) cfg.easterEgg = false;
   if (!cfg.memoryMode) cfg.memoryMode = 'auto';
   if (!cfg.updaterUrl) cfg.updaterUrl = DEFAULT_UPDATER_URL;
+  cfg.backup = mergeBackup(cfg);
   return cfg;
 });
 
@@ -1350,6 +1422,47 @@ ipcMain.handle('version:backup', (event, gameDir, versionId) => {
 ipcMain.handle('version:delete', (event, gameDir, versionId) => {
   try {
     return Object.assign({ ok: true }, instance.deleteVersion(gameDir, versionId));
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+/* ---------------- 自动备份（#13） ---------------- */
+ipcMain.handle('version:backups-list', (event, gameDir, versionId) => {
+  try {
+    return Object.assign({ ok: true }, instance.listAutoBackups(gameDir, versionId));
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('version:backup-restore', (event, gameDir, versionId, opts) => {
+  try {
+    opts = opts || {};
+    const cfg = readConfig();
+    const settings = cfg.versionSettings || {};
+    const isolated = !!(settings[versionId] && settings[versionId].isolated);
+    const savesDir = instance.savesDirFor(gameDir, versionId, isolated);
+    let dest;
+    if (opts.scope === 'version') {
+      dest = gameDir; // zip 内根为 versions/<id> 与 instances/<id>，直接释回 gameDir
+    } else {
+      const folder = opts.folder || '';
+      if (!folder) return { ok: false, error: '缺少世界名' };
+      dest = opts.mode === 'copy'
+        ? path.join(savesDir, folder + '-恢复-' + bkStamp())
+        : path.join(savesDir, folder);
+    }
+    zip.extractAll(opts.zipPath, dest);
+    return { ok: true, dest };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('backup:run-now', async () => {
+  try {
+    return await runAutoBackup({ force: true });
   } catch (e) {
     return { ok: false, error: e.message };
   }
