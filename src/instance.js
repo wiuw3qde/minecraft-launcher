@@ -8,7 +8,11 @@
  */
 const fs = require('fs');
 const path = require('path');
-const zlib = require('zlib');
+const nbt = require('./nbt');
+
+// NBT 解析统一收敛到 src/nbt.js（S0 共用底座，带边界防护与跨版本字段摘要）。
+// 此处保留 parseNbt 别名以兼容既有导出。
+const parseNbt = nbt.parseNbt;
 
 /* ============ 路径解析 ============ */
 
@@ -153,73 +157,12 @@ function deleteFileSafe(parentDir, name) {
 
 /* ============ 世界管理（level.dat NBT 解析） ============ */
 
-/** 极简 NBT 解析（大端），仅取顶层 compound 下字段，足够读 level.dat */
-function parseNbt(buf) {
-  let pos = 0;
-  function readString() {
-    const len = buf.readUInt16BE(pos);
-    pos += 2;
-    const s = buf.slice(pos, pos + len).toString('utf8');
-    pos += len;
-    return s;
-  }
-  function readValue(type) {
-    switch (type) {
-      case 0:
-        return null;
-      case 1:
-        { const v = buf.readInt8(pos); pos += 1; return v; }
-      case 2:
-        { const v = buf.readInt16BE(pos); pos += 2; return v; }
-      case 3:
-        { const v = buf.readInt32BE(pos); pos += 4; return v; }
-      case 4:
-        { const v = Number(buf.readBigInt64BE(pos)); pos += 8; return v; }
-      case 5:
-        { const v = buf.readFloatBE(pos); pos += 4; return v; }
-      case 6:
-        { const v = buf.readDoubleBE(pos); pos += 8; return v; }
-      case 7:
-        { const len = buf.readInt32BE(pos); pos += 4; const a = buf.slice(pos, pos + len); pos += len; return a; }
-      case 8:
-        return readString();
-      case 9:
-        {
-          const et = buf.readUInt8(pos); pos += 1;
-          const len = buf.readInt32BE(pos); pos += 4;
-          const arr = [];
-          for (let i = 0; i < len; i++) arr.push(readValue(et));
-          return arr;
-        }
-      case 10:
-        {
-          const obj = {};
-          while (true) {
-            const t = buf.readUInt8(pos); pos += 1;
-            if (t === 0) break;
-            const name = readString();
-            obj[name] = readValue(t);
-          }
-          return obj;
-        }
-      case 11:
-        { const len = buf.readInt32BE(pos); pos += 4; const arr = []; for (let i = 0; i < len; i++) { arr.push(buf.readInt32BE(pos)); pos += 4; } return arr; }
-      case 12:
-        { const len = buf.readInt32BE(pos); pos += 4; const arr = []; for (let i = 0; i < len; i++) { arr.push(Number(buf.readBigInt64BE(pos))); pos += 8; } return arr; }
-      default:
-        throw new Error('不支持的 NBT 标签：' + type);
-    }
-  }
-  const rootType = buf.readUInt8(pos); pos += 1;
-  readString(); // 根名（通常 "")
-  return readValue(rootType);
-}
+/* parseNbt 已由顶部别名提供（见 src/nbt.js），此处不再保留第二套实现。 */
 
 const GAME_TYPES = { 0: '生存', 1: '创造', 2: '冒险', 3: '旁观' };
 
 function readLevelDat(filePath) {
-  const raw = zlib.gunzipSync(fs.readFileSync(filePath));
-  return parseNbt(raw);
+  return nbt.readLevelDat(filePath);
 }
 
 function listWorlds(savesDir) {

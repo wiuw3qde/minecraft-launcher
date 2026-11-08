@@ -34,6 +34,22 @@ async function javaPath() {
 (async () => {
   console.log('OptiFine 安装测试（真实网络 + 真实安装器）\n');
 
+  // 前置条件：需要本机 mc-forge-probe 里已装好原版 1.20.1 与对应 Forge 版本。
+  // 缺失时应当「跳过」而不是抛异常退出 1，否则会掐断 package.json 里 && 串起的整条测试链，
+  // 导致后面的测试全部静默不执行。
+  const REQUIRED = [
+    path.join(PROBE, 'versions', '1.20.1', '1.20.1.json'),
+    path.join(PROBE, 'versions', '1.20.1', '1.20.1.jar'),
+    path.join(PROBE, 'versions', '1.20.1-forge-47.4.28', '1.20.1-forge-47.4.28.json'),
+  ];
+  const missing = REQUIRED.filter((p) => !fs.existsSync(p));
+  if (missing.length) {
+    console.log('! 跳过 OptiFine 安装集成测试：缺少前置版本文件（mc-forge-probe 未准备）。');
+    console.log('  缺少：\n  ' + missing.join('\n  '));
+    console.log('  属环境依赖，不影响其它测试；准备好后本测试会自动启用。');
+    process.exit(0);
+  }
+
   // 最小化游戏目录：只要版本 json + jar 存在，安装器就能干活
   fs.mkdirSync(path.join(GAME, 'versions', '1.20.1'), { recursive: true });
   fs.copyFileSync(path.join(PROBE, 'versions', '1.20.1', '1.20.1.json'), path.join(GAME, 'versions', '1.20.1', '1.20.1.json'));
