@@ -136,8 +136,9 @@ function uploadAsset(releaseId, filePath) {
   });
 }
 
-// ---------- 更新日志（git 提交历史） ----------
-function buildChangelog() {
+// ---------- 更新日志 ----------
+/** 从「上一个 tag..HEAD」摘取提交标题，过滤纯版本号 / chore 噪声 */
+function gitLogLines() {
   let lastTag = '';
   try { lastTag = execSync('git describe --tags --abbrev=0', { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch (e) { lastTag = ''; }
   const range = lastTag ? `${lastTag}..HEAD` : 'HEAD';
@@ -145,18 +146,32 @@ function buildChangelog() {
   try {
     log = execSync(`git log ${range} --pretty=format:"- %s (%h)"`, { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
   } catch (e) { log = ''; }
-  // 过滤掉纯版本号自增 / chore 类噪声提交
-  const lines = log
-    ? log.split('\n').filter((l) => !/^(chore|version|bump)[: ]/i.test(l.trim()))
-    : [];
+  return log ? log.split('\n').filter((l) => !/^(chore|version|bump)[: ]/i.test(l.trim())) : [];
+}
+
+/**
+ * Release 正文：
+ *  - 若存在 releases/<TAG>.md（手写、面向用户的正式说明），以它为主体，末尾附提交清单；
+ *  - 否则回退到「由 git 提交历史自动生成」，保证不写说明也能正常发版。
+ */
+function buildChangelog() {
   const date = new Date().toISOString().slice(0, 10);
-  let body = `## MC 启动器 ${TAG}（${date}）\n\n`;
-  if (lines.length) {
-    body += '### 更新内容\n' + lines.join('\n') + '\n';
+  const notesPath = path.join(ROOT, 'releases', TAG + '.md');
+  const hasNotes = fs.existsSync(notesPath);
+  const lines = gitLogLines();
+  let body;
+  if (hasNotes) {
+    body = fs.readFileSync(notesPath, 'utf8').trim();
+    console.log('[publish] 采用手写 Release 说明：releases/' + TAG + '.md');
+    if (lines.length) body += '\n\n### 本次包含的提交\n' + lines.join('\n') + '\n';
   } else {
-    body += '（本次发布无新增提交记录，可能是资源/构建调整）\n';
+    body = `## MC 启动器 ${TAG}（${date}）\n\n`;
+    body += lines.length
+      ? '### 更新内容\n' + lines.join('\n') + '\n'
+      : '（本次发布无新增提交记录，可能是资源/构建调整）\n';
   }
-  body += '\n---\n自动发布于 `npm run ship` · 由 git 提交历史生成';
+  body += '\n---\n自动发布于 `npm run ship` · ' + date +
+    (hasNotes ? ' · 正文来自 releases/' + TAG + '.md' : ' · 由 git 提交历史生成');
   return body;
 }
 
@@ -203,7 +218,9 @@ function buildChangelog() {
   // 2) 上传缺失资产
   for (const f of assets) {
     const name = path.basename(f);
-    if (existing.has(name)) {
+    // GitHub 上的资产名经 asciiName 转换过（中文会损坏），判断重名时必须用同一个名字，
+    // 否则重复执行发布会尝试再次上传同名资产而被 422 already_exists 拒绝。
+    if (existing.has(asciiName(name))) {
       console.log('[publish] 跳过已存在资产：', name);
       continue;
     }
