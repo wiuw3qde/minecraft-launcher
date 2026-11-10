@@ -6,7 +6,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node tests/core.test.js && node tests/launch.test.js && node tests/msauth.test.js && node tests/loaders.test.js && node tests/optifine.test.js && node tests/modplatforms.test.js && node tests/cancel.test.js && node tests/maps-test.js && node tests/instance.test.js && node tests/modpack.test.js && node tests/modupdate.test.js && node tests/nbt.test.js && node tests/worldstate.test.js && node tests/eventrules.test.js",
+    "test": "node tests/core.test.js && node tests/launch.test.js && node tests/msauth.test.js && node tests/loaders.test.js && node tests/optifine.test.js && node tests/modplatforms.test.js && node tests/cancel.test.js && node tests/maps-test.js && node tests/instance.test.js && node tests/modpack.test.js && node tests/modupdate.test.js && node tests/nbt.test.js && node tests/worldstate.test.js && node tests/eventrules.test.js && node tests/worldinfo.test.js",
     "test-heavy": "node tests/download.test.js",
     "dist": "node scripts/build.js",
     "dist:dir": "node scripts/build.js --dir",

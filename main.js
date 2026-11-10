@@ -1298,6 +1298,23 @@ ipcMain.handle('version:worlds', (event, gameDir, versionId) => {
   }
 });
 
+// ROADMAP S1 / N12：批量读取世界存档卡片数据（纯本地、只读，不写任何世界文件）。
+// folders 支持单个字符串或数组；上限 200 个，防止一次 IPC 拉爆主进程。
+ipcMain.handle('world:info', (event, gameDir, versionId, folders) => {
+  try {
+    const cfg = readConfig();
+    const settings = cfg.versionSettings || {};
+    const isolated = !!(settings[versionId] && settings[versionId].isolated);
+    const dir = instance.savesDirFor(gameDir, versionId, isolated);
+    const list = (Array.isArray(folders) ? folders : (folders == null ? [] : [folders]))
+      .slice(0, 200)
+      .map((f) => String(f));
+    return { ok: true, savesDir: dir, items: list.map((f) => instance.worldInfo(dir, f)) };
+  } catch (e) {
+    return { ok: false, error: e.message, items: [] };
+  }
+});
+
 ipcMain.handle('version:world-open', (event, gameDir, versionId, folder) => {
   try {
     const cfg = readConfig();

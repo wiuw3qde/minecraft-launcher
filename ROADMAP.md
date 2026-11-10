@@ -252,8 +252,8 @@
 
 | 阶段 | 内容 | 新增/改动 | UI 落点 | 验收 |
 | --- | --- | --- | --- | --- |
-| **S0** | 共用底座：NBT 解析 + 世界状态 + 事件规则库 | `src/nbt.js`、`src/worldstate.js`、`src/eventrules.js` + 对应测试 | 无（纯逻辑） | 单元测试全过；构造的 level.dat / 日志样本能正确解析；损坏输入不抛异常 |
-| **S1** | N12 世界存档卡片 | `main.js` 新增 `world:info` IPC、`preload.js` 暴露、`version.js` 世界列表增强、样式 | 版本页「世界」区 | 每个世界显示种子、游戏时长、坐标、维度、最后游玩时间 |
+| **S0** 🟢 | 共用底座：NBT 解析 + 世界状态 + 事件规则库 | `src/nbt.js`、`src/worldstate.js`、`src/eventrules.js` + 对应测试 | 无（纯逻辑） | 单元测试全过；构造的 level.dat / 日志样本能正确解析；损坏输入不抛异常 |
+| **S1** 🟢 | N12 世界存档卡片 | `main.js` 新增 `world:info` IPC、`preload.js` 暴露、`version.js` 世界列表增强、样式 | 版本页「世界」区 | 每个世界显示种子、游戏时长、坐标、维度、最后游玩时间 |
 | **S2** | N3 跨版本守卫 + N1 冒险日记 | `launch:start` 前置检查、`world:timeline` IPC、版本页新增「冒险日记」区 | 版本页 | 换版本开档有提示且自动快照；时间线能展示一次游玩的事件流 |
 | **S3** | N2 时光机时间轴 + N6 后悔药 | `instance.js` 快照元数据（备份时附带 level.dat 摘要）、diff 计算、操作历史 | 版本页「备份与恢复」区 | 备份列表显示内容差异；可另存副本恢复；破坏性操作可撤销 |
 
@@ -268,12 +268,23 @@
 - **验证**：`node --check` 全过；`npm test` **真实退出码 0**，`instance.test.js` / `modupdate`(21/0) / 三个新测试全部通过。
 - **边界**：本轮按用户指示**只提交、不打包**；未改动 UI、未接入 IPC、未改版本号（仍 0.2.2）。
 
-**下一步（S1，待开工）**：`world:info` IPC → preload → 版本页世界列表显示存档卡片（种子/游戏时长/坐标/维度/最后游玩）。`/src/nbt.js` 的 `readLevelSummary` 可直接投用。
+### 6.3.2 S1 完成记录（2026-11-10，🟢 已实现未发布）
+
+- **顺手修掉两个底层真 bug**（不修的话卡片上的数据会是错的）：
+  - `instance.listWorlds` 原来按**顶层**取 `LevelName / LastPlayed / GameType / hardcore`，但真实 `level.dat` 是 `{Data:{...}}` 嵌套结构 —— 世界名、最后游玩时间、游戏模式其实**长期读不到**（旧测试用的是扁平假数据才通过）。现统一改走 `nbt.readLevelSummary` → `summarizeLevel`，同时兼容扁平旧结构。
+  - MC 种子是 64 位整数，原 `parseNbt` 用 `Number(readBigInt64BE())` 会丢精度（如 `-4172144997902289642` 显示成 `-4172144997902289600`）。现给 `parseNbt` 加 `longAsBigInt` 选项（默认 false 保持兼容），`readLevelSummary` 开启该模式，摘要新增 **`seedText`**（精确十进制文本）；旧 `seed:number` 字段保留兼容，**UI 一律用 `seedText`**。
+- **新增 `world:info` IPC**：`main.js` 批量（上限 200 个）→ `instance.worldInfo(savesDir, folder)` 只读卡片数据；`worldInfo` 做目录名合法性 + `path.resolve` 越界双重校验（防 `..` / 绝对路径 / 盘符），绝不写文件。
+- **UI**：版本页「世界管理」每个世界下展开「存档卡片」网格——种子（可复制）、游戏时长（含约第 N 天）、最后游玩、坐标、维度、出生点、模式/难度、玩家状态、建档版本/DataVersion、作弊/图标；异步批量回填带 token 防重绘竞态；解析失败只降级为提示。**只读、不上云**。
+- **测试**：新增 `tests/worldinfo.test.js`（真实 `Data` 结构回归、只读硬边界、损坏/缺失降级、12 类目录穿越拒绝、扁平旧结构兼容）；`tests/nbt.test.js` 补 64 位种子精度。两者加入 `test` 链。
+- **验证**：`node --check` 全过；`npm test` 真实退出码 **0**（含 instance/modupdate 21-0/三个 S0 测试/两个新测试）。
+- **边界**：本轮用户确认 **S1 + S2 一起做、仍不打包**，只提交；版本号仍 `0.2.2`。
+
+**下一步（S2，进行中）**：N3 跨版本开档守卫（`launch:start` 前置检查 + 快照/复制副本 + 可关闭）+ N1 冒险日记（`world:timeline` + 版本页时间线）。
 
 ### 6.4 工程约定
 
 - 当前版本 **v0.2.2**；后续按 patch 递增，到 `0.2.9` 后由 `build.js` 进位 `0.3.0`（勿手动改 `bumpVersion`）。
-- **本轮用户明确「先不打包」**：S0 完成后只 `git commit`，**不执行 `npm run ship`**，等用户确认。
+- **用户明确「先不打包」（2026-11-10 再次确认仍不打包）**：S0/S1/S2 完成后只 `git commit`，**不执行 `npm run ship`**，等用户确认。S1+S2 为同一轮连续推进，分两次提交便于回溯。
 - 每次改动后跑 `node --check` + `npm test`（全套 0 失败）。
 - **⚠️ 校验退出码的正确姿势**：不要用 `npm test | tail` 判断成功——管道退出码是 `tail` 的，会掩盖 `npm test` 的失败。用 `npm test > /tmp/x.log 2>&1; echo $?`。
 - **已修（2026-11-08）**：`tests/optifine.test.js` 原先无条件复制 `mc-forge-probe` 里的原版 1.20.1 文件，本机缺前置条件时抛 ENOENT → `process.exit(1)` → 掐断 `&&` 测试链，导致其后的 modplatforms/cancel/maps/instance/modpack/modupdate 等测试**静默不执行**，且历史汇报曾据此误判「全套通过」。现已改为「缺前置条件就打印跳过并 exit 0」。修复后 `npm test` 真实退出码 0，全部测试确实跑完且通过。

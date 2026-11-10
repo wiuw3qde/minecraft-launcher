@@ -8,6 +8,7 @@
   let versions = [];
   let settingsMap = {};
   let currentId = null;
+  let worldCardsToken = 0; // 防止世界卡片异步回填时列表已被重绘
 
   function gameDirNow() {
     // 优先走 app.js 暴露的桥接；若尚未就绪或返回空，则直接读输入框（输入框是游戏目录的真相源）。
@@ -37,6 +38,37 @@
     } catch (e) {
       return '未知';
     }
+  }
+
+  /* ---- S1 / N12 存档卡片格式化（纯展示，所有外部字符串都要 esc） ---- */
+  const WC_DIMS = {
+    'minecraft:overworld': '主世界', overworld: '主世界', '0': '主世界',
+    'minecraft:the_nether': '下界', the_nether: '下界', '-1': '下界',
+    'minecraft:the_end': '末地', the_end: '末地', '1': '末地',
+  };
+  const WC_DIFFS = { 0: '和平', 1: '简单', 2: '普通', 3: '困难' };
+  const WC_GAME_TYPES = { 0: '生存', 1: '创造', 2: '冒险', 3: '旁观' };
+
+  function fmtDuration(sec) {
+    if (sec == null) return '—';
+    const s = Math.max(0, Math.round(sec));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (h) return h + ' 小时 ' + m + ' 分';
+    if (m) return m + ' 分';
+    return s + ' 秒';
+  }
+  function fmtCoord(pos) {
+    if (!Array.isArray(pos) || pos.length < 3) return '—';
+    const f = (v) => (typeof v === 'number' && isFinite(v))
+      ? (Math.round(v * 10) / 10).toFixed(1).replace(/\.0$/, '') : '?';
+    return f(pos[0]) + ', ' + f(pos[1]) + ', ' + f(pos[2]);
+  }
+  function wcItem(k, valueHtml, copyText) {
+    return '<div class="vm-wc-item"><div class="vm-wc-k">' + esc(k) + '</div>' +
+      '<div class="vm-wc-v">' + valueHtml +
+      (copyText ? ' <button class="small ghost vm-wc-copy" type="button" data-copy="' + esc(copyText) + '">复制</button>' : '') +
+      '</div></div>';
   }
 
   /* ---------------- 列表 ---------------- */
@@ -194,7 +226,7 @@
           <h2 style="margin:0"><span class="h2num">3</span>世界管理 <span class="vm-count">${counts.worlds}</span></h2>
           <button class="ghost small" data-act="refresh-worlds">刷新</button>
         </div>
-        <p class="hint">存档目录：${esc(p.savesDir)}</p>
+        <p class="hint">存档目录：${esc(p.savesDir)}　·　存档卡片读自 level.dat，仅本地显示，不上传任何数据。</p>
         <div class="vm-worldlist" id="vmWorldList"></div>
       </section>
 
@@ -423,8 +455,9 @@
       .catch((e) => alert('更新出错：' + e.message));
   }
 
-  /* ---------------- 世界 ---------------- */
+  /* ---------------- 世界（S1 / N12 存档卡片） ---------------- */
   async function loadWorlds(d) {
+    worldCardsToken++; // 让任何在途的卡片回填失效
     const box = el('vmWorldList');
     box.innerHTML = '<div class="vm-mini-hint">加载中…</div>';
     const res = await window.launcher.version.worlds(gameDir, d.id);
@@ -436,13 +469,16 @@
       const row = document.createElement('div');
       row.className = 'vm-world';
       row.innerHTML =
-        '<div class="vm-world-main"><span class="vm-world-name">' + esc(w.name) + '</span>' +
-        '<span class="vm-world-sub">' + (w.gameTypeName ? esc(w.gameTypeName) : '未知模式') + (w.hardcore ? ' · 极限' : '') + ' · ' + fmtSize(w.size) + ' · 最后游玩 ' + fmtDate(w.lastPlayed) + '</span></div>' +
-        '<span class="vm-mod-acts">' +
-        '<button class="small ghost" data-open>打开</button>' +
-        '<button class="small ghost" data-bak>备份</button>' +
-        '<button class="small danger" data-del>删除</button>' +
-        '</span>';
+        '<div class="vm-world-head">' +
+          '<div class="vm-world-main"><span class="vm-world-name">' + esc(w.name) + '</span>' +
+          '<span class="vm-world-sub">' + (w.gameTypeName ? esc(w.gameTypeName) : '未知模式') + (w.hardcore ? ' · 极限' : '') + ' · ' + fmtSize(w.size) + ' · 最后游玩 ' + fmtDate(w.lastPlayed) + '</span></div>' +
+          '<span class="vm-mod-acts">' +
+          '<button class="small ghost" data-open>打开</button>' +
+          '<button class="small ghost" data-bak>备份</button>' +
+          '<button class="small danger" data-del>删除</button>' +
+          '</span>' +
+        '</div>' +
+        '<div class="vm-world-card vm-wc-loading" data-folder="' + esc(w.folder) + '">读取存档卡片…</div>';
       row.querySelector('[data-open]').addEventListener('click', async () => {
         const r = await window.launcher.version.worldOpen(gameDir, d.id, w.folder);
         if (r && !r.ok) alert('打开失败：' + r.error);
@@ -460,6 +496,74 @@
       });
       box.appendChild(row);
     });
+    loadWorldCards(d.id, worlds, box);
+  }
+
+  function worldCardHtml(it) {
+    if (!it.ok || !it.summary) {
+      return '<div class="vm-wc-note">无法读取存档卡片：' + esc(it.error || 'level.dat 解析失败') + '</div>';
+    }
+    const s = it.summary;
+    const p = s.player || {};
+    const days = s.gameTicks != null ? Math.floor(s.gameTicks / 24000) + 1 : null;
+    const dur = (s.gameSeconds == null ? '—' : fmtDuration(s.gameSeconds)) +
+      (days != null ? ' <span class="vm-wc-extra">· 约第 ' + days + ' 天</span>' : '');
+    const mode = (WC_GAME_TYPES[s.gameType] || (s.gameType == null ? '—' : '模式 ' + s.gameType)) +
+      (s.hardcore ? ' · 极限' : '');
+    const diff = s.difficulty == null ? '—' : (WC_DIFFS[s.difficulty] || String(s.difficulty));
+    const dimRaw = p.dimension;
+    const dim = dimRaw == null ? '—' : (WC_DIMS[String(dimRaw)] || esc(String(dimRaw)));
+    const ver = [s.versionName ? esc(s.versionName) : '', s.dataVersion != null ? '数据 #' + s.dataVersion : '']
+      .filter(Boolean).join(' · ') || '—';
+    const seed = s.seedText != null ? esc(s.seedText) : '—';
+    const player = [p.xpLevel != null ? '等级 ' + p.xpLevel : '', p.health != null ? '生命 ' + Math.round(p.health * 10) / 10 : '']
+      .filter(Boolean).join(' · ') || '—';
+    const cheats = s.allowCommands == null ? '—' : (s.allowCommands ? '允许' : '关闭');
+    return [
+      wcItem('种子', seed, s.seedText != null ? s.seedText : null),
+      wcItem('游戏时长', dur),
+      wcItem('最后游玩', esc(fmtDate(s.lastPlayed))),
+      wcItem('坐标', esc(fmtCoord(p.pos))),
+      wcItem('维度', dim),
+      wcItem('出生点', esc(fmtCoord(p.spawn))),
+      wcItem('模式 / 难度', esc(mode) + ' · ' + esc(diff)),
+      wcItem('玩家状态', esc(player)),
+      wcItem('建档版本', ver),
+      wcItem('作弊 / 图标', esc(cheats) + ' · ' + (it.hasIcon ? '有' : '无')),
+    ].join('');
+  }
+
+  async function loadWorldCards(versionId, worlds, box) {
+    const token = ++worldCardsToken;
+    try {
+      const res = await window.launcher.version.worldInfo(gameDir, versionId, worlds.map((w) => w.folder));
+      if (token !== worldCardsToken || !box.isConnected) return;
+      const map = {};
+      ((res && res.items) || []).forEach((it) => { if (it && it.folder != null) map[it.folder] = it; });
+      box.querySelectorAll('.vm-world-card').forEach((card) => {
+        const it = map[card.getAttribute('data-folder')];
+        card.classList.remove('vm-wc-loading');
+        card.innerHTML = it ? worldCardHtml(it) : '<div class="vm-wc-note">存档信息读取失败</div>';
+        const btn = card.querySelector('[data-copy]');
+        if (btn) btn.addEventListener('click', () => {
+          const text = btn.getAttribute('data-copy') || '';
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => {
+              btn.textContent = '已复制';
+              setTimeout(() => { if (btn.isConnected) btn.textContent = '复制'; }, 1200);
+            }).catch(() => alert('复制失败，种子：' + text));
+          } else {
+            alert('种子：' + text);
+          }
+        });
+      });
+    } catch (e) {
+      if (token !== worldCardsToken || !box.isConnected) return;
+      box.querySelectorAll('.vm-world-card').forEach((card) => {
+        card.classList.remove('vm-wc-loading');
+        card.innerHTML = '<div class="vm-wc-note">存档信息加载失败：' + esc(e && e.message ? e.message : '未知错误') + '</div>';
+      });
+    }
   }
 
   /* ---------------- 备份与恢复（#13） ---------------- */

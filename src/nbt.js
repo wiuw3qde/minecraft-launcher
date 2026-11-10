@@ -18,12 +18,15 @@ const DEFAULT_LIMITS = {
   maxStringLen: 1 << 20,
   maxArrayLen: 1 << 20,
   maxNodes: 200000,
+  // TAG_Long 默认仍转 Number（兼容旧调用方）；readLevelSummary 会开启
+  // longAsBigInt 以保留 64 位种子的精确值，避免大种子被 IEEE754 截尾。
+  longAsBigInt: false,
 };
 
 /**
  * 解析 NBT 字节流（大端）。根标签名会被跳过，返回根值对应的 JS 值。
  * @param {Buffer} buf 未压缩的 NBT 数据
- * @param {object} [limits] 防护上限
+ * @param {object} [limits] 防护上限；longAsBigInt=true 时 TAG_Long 返回 BigInt
  * @returns {*} 解析结果；数据损坏/超限时抛 Error（由 readLevelDat 捕获）
  */
 function parseNbt(buf, limits) {
@@ -39,7 +42,7 @@ function parseNbt(buf, limits) {
   function i8() { need(1); const v = buf.readInt8(pos); pos += 1; return v; }
   function i16() { need(2); const v = buf.readInt16BE(pos); pos += 2; return v; }
   function i32() { need(4); const v = buf.readInt32BE(pos); pos += 4; return v; }
-  function i64() { need(8); const v = Number(buf.readBigInt64BE(pos)); pos += 8; return v; }
+  function i64() { need(8); const v = buf.readBigInt64BE(pos); pos += 8; return lim.longAsBigInt ? v : Number(v); }
   function f32() { need(4); const v = buf.readFloatBE(pos); pos += 4; return v; }
   function f64() { need(8); const v = buf.readDoubleBE(pos); pos += 8; return v; }
   function str() {
@@ -108,6 +111,7 @@ function readLevelDat(filePath, limits) {
 }
 
 function num(v) {
+  if (typeof v === 'bigint') return Number(v);
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 function pick(obj, paths) {
@@ -123,16 +127,16 @@ function pick(obj, paths) {
   return null;
 }
 function firstNum(obj, paths) {
-  const v = pick(obj, paths);
-  return num(v);
+  return num(pick(obj, paths));
 }
 
 /**
  * 把原始 level.dat NBT 整理成跨版本稳定的摘要。
  * 字段位置随 MC 版本变化，因此逐字段多路径探测；缺失一律 null，绝不猜测。
+ * 同时兼容真实结构 {Data:{...}} 与扁平结构（旧测试 / 极老版本）。
  * @returns {{name:string|null, dataVersion:number|null, lastPlayed:number|null,
  *   gameTicks:number|null, gameSeconds:number|null, dayTime:number|null,
- *   seed:number|null, versionName:string|null, versionId:string|null,
+ *   seed:number|null, seedText:string|null, versionName:string|null, versionId:string|null,
  *   gameType:number|null, hardcore:boolean|null, allowCommands:boolean|null,
  *   difficulty:number|null, player:object, source:'nbt'}}
  */
@@ -145,6 +149,12 @@ function summarizeLevel(nbt) {
   const versionName = pick(d, [['Version', 'Name'], ['Version', 'name']]);
   const versionId = pick(d, [['Version', 'Id'], ['Version', 'id']]);
   const dimRaw = pick(player, [['Dimension'], ['dimension']]);
+  // 64 位种子必须按十进制文本保留，Number 会丢精度（玩家常用超 2^53 的种子）。
+  const seedText = (function () {
+    if (typeof seedRaw === 'bigint') return seedRaw.toString();
+    if (typeof seedRaw === 'number' && Number.isSafeInteger(seedRaw)) return String(seedRaw);
+    return null;
+  })();
   return {
     name: typeof d.LevelName === 'string' ? d.LevelName : null,
     dataVersion: firstNum(d, [['DataVersion']]),
@@ -153,6 +163,7 @@ function summarizeLevel(nbt) {
     gameSeconds: gameTicks === null ? null : Math.max(0, Math.round(gameTicks / 20)),
     dayTime: firstNum(d, [['DayTime']]),
     seed: num(seedRaw),
+    seedText,
     versionName: typeof versionName === 'string' ? versionName : null,
     versionId: typeof versionId === 'string' ? versionId : null,
     gameType: firstNum(d, [['GameType']]),
@@ -180,7 +191,7 @@ function summarizeLevel(nbt) {
 function readLevelSummary(filePath) {
   try {
     const raw = zlib.gunzipSync(fs.readFileSync(filePath));
-    return { ok: true, summary: summarizeLevel(parseNbt(raw)) };
+    return { ok: true, summary: summarizeLevel(parseNbt(raw, { longAsBigInt: true })) };
   } catch (e) {
     return { ok: false, error: e && e.message ? e.message : '解析失败' };
   }

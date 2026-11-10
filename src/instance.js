@@ -183,28 +183,67 @@ function listWorlds(savesDir) {
     } catch (err) {
       continue;
     }
-    let info = {};
+    // 真实 level.dat 是 {Data:{...}} 嵌套结构，旧的「顶层取 LevelName」写法
+    // 会永远读不到世界名 / 最后游玩时间 / 游戏模式。统一走 nbt.summarizeLevel，
+    // 它同时兼容 {Data:{...}} 与扁平结构，缺失字段返回 null。
+    let s = {};
     const levelDat = path.join(wd, 'level.dat');
     if (fs.existsSync(levelDat)) {
-      try {
-        info = readLevelDat(levelDat) || {};
-      } catch (err) {
-        info = {};
-      }
+      const r = nbt.readLevelSummary(levelDat);
+      if (r.ok) s = r.summary;
     }
     out.push({
       folder: e.name,
-      name: info.LevelName || e.name,
-      lastPlayed: typeof info.LastPlayed === 'number' ? info.LastPlayed : 0,
-      gameType: typeof info.GameType === 'number' ? info.GameType : null,
-      gameTypeName: GAME_TYPES[info.GameType] || '',
-      hardcore: !!info.hardcore,
+      name: s.name || e.name,
+      lastPlayed: s.lastPlayed || 0,
+      gameType: s.gameType === undefined ? null : s.gameType,
+      gameTypeName: GAME_TYPES[s.gameType] || '',
+      hardcore: s.hardcore === true,
       size: dirSize(wd),
       mtime: st.mtimeMs,
     });
   }
   out.sort((a, b) => (b.lastPlayed || b.mtime) - (a.lastPlayed || a.mtime));
   return out;
+}
+
+/**
+ * 单个世界的只读存档卡片数据（ROADMAP S1 / N12）。
+ * 硬边界：folder 只能是单个目录名，解析后必须仍在 savesDir 内，绝不写任何文件。
+ * @returns {{ok:boolean, folder:string, summary:object|null, error:string|null,
+ *   hasLevelDat?:boolean, hasIcon?:boolean}}
+ */
+function worldInfo(savesDir, folder) {
+  const name = String(folder == null ? '' : folder);
+  if (!name || name === '.' || name === '..' || /[\\/\0:]/.test(name) ||
+      path.isAbsolute(name) || name.trim() !== name) {
+    return { ok: false, folder: name, error: '世界目录名不合法' };
+  }
+  let wd;
+  try {
+    const root = path.resolve(savesDir);
+    wd = path.resolve(root, name);
+    if (wd !== path.join(root, name) || wd.indexOf(root + path.sep) !== 0) {
+      return { ok: false, folder: name, error: '世界目录越界' };
+    }
+    if (!fs.statSync(wd).isDirectory()) return { ok: false, folder: name, error: '世界目录不存在' };
+  } catch (e) {
+    return { ok: false, folder: name, error: '世界目录不存在' };
+  }
+  const hasIcon = fs.existsSync(path.join(wd, 'icon.png'));
+  const levelDat = path.join(wd, 'level.dat');
+  if (!fs.existsSync(levelDat)) {
+    return { ok: false, folder: name, summary: null, error: '未找到 level.dat（可能不是有效存档）', hasLevelDat: false, hasIcon };
+  }
+  const r = nbt.readLevelSummary(levelDat);
+  return {
+    ok: r.ok,
+    folder: name,
+    summary: r.summary || null,
+    error: r.error || null,
+    hasLevelDat: true,
+    hasIcon,
+  };
 }
 
 /* ============ 资源包管理（读写 options.txt） ============ */
@@ -594,6 +633,7 @@ module.exports = {
   toggleMod,
   deleteFileSafe,
   listWorlds,
+  worldInfo,
   readLevelDat,
   parseNbt,
   listResourcePacks,

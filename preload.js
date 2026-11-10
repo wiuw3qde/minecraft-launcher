@@ -91,6 +91,7 @@ const api = {
     modToggle: (gameDir, versionId, name) => ipcRenderer.invoke('version:mod-toggle', gameDir, versionId, name),
     modDelete: (gameDir, versionId, name) => ipcRenderer.invoke('version:mod-delete', gameDir, versionId, name),
     worlds: (gameDir, versionId) => ipcRenderer.invoke('version:worlds', gameDir, versionId),
+    worldInfo: (gameDir, versionId, folders) => ipcRenderer.invoke('world:info', gameDir, versionId, folders),
     worldOpen: (gameDir, versionId, folder) => ipcRenderer.invoke('version:world-open', gameDir, versionId, folder),
     worldBackup: (gameDir, versionId, folder) => ipcRenderer.invoke('version:world-backup', gameDir, versionId, folder),
     worldDelete: (gameDir, versionId, folder) => ipcRenderer.invoke('version:world-delete', gameDir, versionId, folder),

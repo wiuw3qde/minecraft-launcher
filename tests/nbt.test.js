@@ -146,6 +146,30 @@ function writeLevel(name, entries) {
   assert.deepStrictEqual(nbt.summarizeLevel(null).player.pos, null);
 }
 
+/* ---------- 4.1 64 位种子精度（S1 新增，UI 必须用 seedText） ---------- */
+{
+  const BIG = '-4172144997902289642';
+  const p = writeLevel('bigseed.dat', [
+    comp('Data', [
+      tag(8, 'LevelName', wStr('大种子世界')),
+      comp('WorldGenSettings', [tag(4, 'seed', wI64(BIG))]),
+      tag(4, 'LastPlayed', wI64(1730000000000)),
+    ]),
+  ]);
+  const s = nbt.readLevelSummary(p).summary;
+  assert.strictEqual(s.seedText, BIG, '种子必须精确保留为十进制文本');
+  assert.strictEqual(typeof s.seed, 'number', 'seed 字段保持 number 以兼容旧调用方');
+  assert.notStrictEqual(String(s.seed), BIG, 'Number 路径必然丢精度，绝不能拿来做展示');
+  assert.strictEqual(s.lastPlayed, 1730000000000, 'bigint 模式下的时间戳仍能正确转 number');
+
+  const raw = zlib.gunzipSync(fs.readFileSync(p));
+  assert.strictEqual(typeof nbt.parseNbt(raw, { longAsBigInt: true }).Data.WorldGenSettings.seed, 'bigint');
+  assert.strictEqual(typeof nbt.parseNbt(raw).Data.WorldGenSettings.seed, 'number', '默认模式保持兼容');
+  assert.strictEqual(nbt.readLevelSummary(writeLevel('flatseed.dat', [
+    tag(4, 'RandomSeed', wI64(123456789)),
+  ])).summary.seedText, '123456789', '旧版扁平结构也能输出精确种子');
+}
+
 /* ---------- 5. 兼容性：instance.readLevelDat 仍走同一解析器 ---------- */
 {
   const p = writeLevel('compat.dat', [tag(8, 'LevelName', wStr('兼容世界'))]);
