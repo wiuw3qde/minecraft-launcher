@@ -213,12 +213,16 @@ function listWorlds(savesDir) {
  * @returns {{ok:boolean, folder:string, summary:object|null, error:string|null,
  *   hasLevelDat?:boolean, hasIcon?:boolean}}
  */
-function worldInfo(savesDir, folder) {
+function safeFolderName(folder) {
   const name = String(folder == null ? '' : folder);
   if (!name || name === '.' || name === '..' || /[\\/\0:]/.test(name) ||
-      path.isAbsolute(name) || name.trim() !== name) {
-    return { ok: false, folder: name, error: '世界目录名不合法' };
-  }
+      path.isAbsolute(name) || name.trim() !== name) return null;
+  return name;
+}
+
+function worldInfo(savesDir, folder) {
+  const name = safeFolderName(folder);
+  if (!name) return { ok: false, folder: String(folder == null ? '' : folder), error: '世界目录名不合法' };
   let wd;
   try {
     const root = path.resolve(savesDir);
@@ -244,6 +248,64 @@ function worldInfo(savesDir, folder) {
     hasLevelDat: true,
     hasIcon,
   };
+}
+
+/**
+ * 复制一份世界存档作为「升级前副本」（S2 / N3 守卫的第二个选项）。
+ * 只新建副本目录，绝不改动原世界；目标名带时间戳，已存在则放弃不覆盖。
+ */
+function copyWorld(savesDir, folder) {
+  const name = safeFolderName(folder);
+  if (!name) return { ok: false, error: '世界目录名不合法' };
+  const root = path.resolve(savesDir);
+  const src = path.resolve(root, name);
+  if (src !== path.join(root, name) || src.indexOf(root + path.sep) !== 0) {
+    return { ok: false, error: '世界目录越界' };
+  }
+  try {
+    if (!fs.statSync(src).isDirectory()) return { ok: false, error: '世界不存在' };
+  } catch (e) {
+    return { ok: false, error: '世界不存在' };
+  }
+  const destName = name + '-升级前-' + timestamp();
+  const dest = path.join(root, destName);
+  if (fs.existsSync(dest)) return { ok: false, error: '目标副本已存在，请稍后重试' };
+  const state = { files: 0, dirs: 0, bytes: 0, skippedLinks: 0 };
+  try {
+    copyDirRecursive(src, dest, state);
+  } catch (e) {
+    // 中途失败会留下半成品，必须清掉，避免玩家误以为副本可用
+    try { fs.rmSync(dest, { recursive: true, force: true }); } catch (e2) { /* ignore */ }
+    return { ok: false, error: e.message };
+  }
+  return { ok: true, dest, folder: destName, files: state.files, bytes: state.bytes, skippedLinks: state.skippedLinks };
+}
+
+/**
+ * 手写递归复制（不跟随符号链接）。
+ * 不用 fs.cpSync：本机 Node 在 Windows + 某些组合下会直接段错误（进程崩溃），
+ * 且手写版能限制文件数/总字节数，避免异常大的存档把启动器拖死。
+ */
+function copyDirRecursive(src, dest, state) {
+  const MAX_FILES = 50000;
+  const MAX_BYTES = 4 * 1024 * 1024 * 1024;
+  const st = fs.statSync(src);
+  if (!st.isDirectory()) {
+    state.files += 1;
+    state.bytes += st.size;
+    if (state.files > MAX_FILES || state.bytes > MAX_BYTES) throw new Error('存档过大，已中止复制');
+    fs.copyFileSync(src, dest);
+    return;
+  }
+  fs.mkdirSync(dest);
+  state.dirs += 1;
+  for (const e of fs.readdirSync(src, { withFileTypes: true })) {
+    if (e.isSymbolicLink()) { state.skippedLinks += 1; continue; }
+    const s = path.join(src, e.name);
+    const d = path.join(dest, e.name);
+    if (e.isDirectory()) copyDirRecursive(s, d, state);
+    else if (e.isFile()) copyDirRecursive(s, d, state);
+  }
 }
 
 /* ============ 资源包管理（读写 options.txt） ============ */
@@ -634,6 +696,8 @@ module.exports = {
   deleteFileSafe,
   listWorlds,
   worldInfo,
+  copyWorld,
+  safeFolderName,
   readLevelDat,
   parseNbt,
   listResourcePacks,

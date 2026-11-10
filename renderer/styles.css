@@ -1403,6 +1403,44 @@ pre {
 .vm-wc-note { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
 .vm-wc-copy { padding: 0 6px !important; font-size: 11px !important; line-height: 1.5; }
 
+/* ===== S2 / N1 冒险日记时间线 ===== */
+.vm-diary-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.vm-diary-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.vm-diary-k { font-size: 11px; color: var(--muted); }
+.vm-diary-stat b { font-size: 14px; font-weight: 600; color: var(--text); }
+.vm-diary-title { font-size: 12px; font-weight: 600; color: var(--text); margin: 8px 0 6px; }
+.vm-diary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.vm-diary-row { display: flex; gap: 10px; font-size: 12px; line-height: 1.6; color: var(--text); }
+.vm-diary-time { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.vm-diary-text { min-width: 0; word-break: break-word; }
+.vm-diary-row.vm-diary-death .vm-diary-text,
+.vm-diary-row.vm-diary-crash .vm-diary-text { color: #d1242f; }
+.vm-diary-row.vm-diary-advancement .vm-diary-text { color: #1a7f37; }
+.vm-diary-row.vm-diary-dimension .vm-diary-text { color: #0969da; }
+.vm-diary-row.vm-diary-world-open .vm-diary-text { font-weight: 600; }
+
 .vm-mod-size {
   font-size: 11px;
   color: var(--muted);

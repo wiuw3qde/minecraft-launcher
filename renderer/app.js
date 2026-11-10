@@ -338,8 +338,8 @@ async function doLaunch(force) {
   );
   const res = await window.launcher.launch.start(cfg);
   if (!res.ok) {
-    status2('启动失败：' + res.error, true);
-    logLine('[错误] ' + res.error);
+    status2(res.cancelled ? res.error : '启动失败：' + res.error, true);
+    logLine(res.cancelled ? '[存档守卫] ' + res.error : '[错误] ' + res.error);
     return;
   }
   setRunning(true);

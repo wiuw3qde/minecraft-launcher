@@ -204,6 +204,11 @@
       '<label class="radio"><input type="radio" name="bkScope" value="version"' + (bk.scope === 'version' ? ' checked' : '') + '/>整个版本</label></div>' +
       '<div class="field-row col"><label class="lbl">纳入自动备份的版本</label><div id="bkTargets" class="bk-targets"><span class="hint">加载中…</span></div></div>' +
       '<div class="row" style="margin-top:10px"><button class="primary" id="bkRunNow">立即备份一次</button><span class="hint" id="bkRunMsg"></span></div>' +
+      '</section>' +
+      '<section class="card"><h2><span class="h2num">6</span>存档安全</h2>' +
+      '<div class="callout-info">启动前检查世界「上次成功打开的版本」是否变化。跨版本开档是丢档头号原因，检出风险时会先询问是否做快照或复制一份副本，再启动游戏。</div>' +
+      '<div class="field-row" style="margin-top:10px"><label class="switch inline"><input type="checkbox" id="guardEnable"' + (cfg.worldGuard !== false ? ' checked' : '') + ' /><span>启用跨版本开档提醒</span></label></div>' +
+      '<p class="hint">判据只依据本机记录（版本 id 与 DataVersion 的相对变化），不联网、不猜测 MC 版本对应关系；首次记录的世界只做中性提示。关闭后仍会记录状态，方便日后重新开启。所有数据仅本地保存。</p>' +
       '</section>';
 
     // 主题切换
@@ -334,6 +339,12 @@
           else msg.textContent = '无需备份';
         }).catch(function (e) { run.disabled = false; run.textContent = '立即备份一次'; if (msg) msg.textContent = '异常：' + (e && e.message || ''); });
       });
+    })();
+
+    // S2 / N3 跨版本开档提醒开关（默认开启；关闭后仍记录状态，只是不弹窗）
+    (function bindWorldGuard() {
+      var ge = $('guardEnable');
+      if (ge) ge.addEventListener('change', function () { save({ worldGuard: ge.checked }); });
     })();
 
     rendered = true;

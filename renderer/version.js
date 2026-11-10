@@ -257,6 +257,18 @@
         <div class="vm-bklist" id="vmBkList">加载中…</div>
       </section>
 
+      <section class="card">
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <h2 style="margin:0"><span class="h2num">7</span>冒险日记 <span class="vm-count" id="vmDiaryCount">—</span></h2>
+          <div class="row" style="margin:0">
+            <button class="ghost small" data-act="copy-diary">复制摘要</button>
+            <button class="ghost small" data-act="refresh-diary">刷新</button>
+          </div>
+        </div>
+        <p class="hint">从 logs/latest.log 还原一次游玩的事件流；纯本地解析、不上传、不采集聊天内容。只展示能明确识别的事件，不猜测。</p>
+        <div id="vmDiary">加载中…</div>
+      </section>
+
       <section class="card vm-danger">
         <h2><span class="h2num">!</span>危险操作</h2>
         <div class="row">
@@ -272,6 +284,7 @@
     loadMods(d);
     loadWorlds(d);
     loadBackups(d);
+    loadDiary(d);
     loadResourcepacks(d);
     loadScreenshots(d);
   }
@@ -298,6 +311,10 @@
     detail.querySelector('[data-act="backup"]').addEventListener('click', () => doBackup(d));
     const rb = detail.querySelector('[data-act="refresh-bk"]');
     if (rb) rb.addEventListener('click', () => loadBackups(d));
+    const rd = detail.querySelector('[data-act="refresh-diary"]');
+    if (rd) rd.addEventListener('click', () => loadDiary(d));
+    const cd = detail.querySelector('[data-act="copy-diary"]');
+    if (cd) cd.addEventListener('click', copyDiary);
     detail.querySelector('[data-act="delete-version"]').addEventListener('click', () => doDelete(d));
   }
 
@@ -564,6 +581,81 @@
         card.innerHTML = '<div class="vm-wc-note">存档信息加载失败：' + esc(e && e.message ? e.message : '未知错误') + '</div>';
       });
     }
+  }
+
+  /* ---------------- 冒险日记（S2 / N1） ---------------- */
+  let diaryData = null;
+
+  function diaryChip(k, v) {
+    return '<div class="vm-diary-stat"><span class="vm-diary-k">' + esc(k) + '</span>' +
+      '<b>' + esc(String(v)) + '</b></div>';
+  }
+  function diaryEventRow(e) {
+    const cls = ' vm-diary-' + String(e.type || 'other').replace(/[^a-z-]/g, '');
+    return '<div class="vm-diary-row' + cls + '">' +
+      '<span class="vm-diary-time">' + esc(e.time || '—') + '</span>' +
+      '<span class="vm-diary-text">' + esc(e.text || '') + '</span></div>';
+  }
+  function diaryText(res) {
+    const st = res.stats || {};
+    const lines = ['【冒险日记】' + (res.source && res.source.path ? '来源：' + res.source.path : '')];
+    lines.push('时长：' + (st.durationSeconds == null ? '未知' : fmtDuration(st.durationSeconds)));
+    lines.push('事件：' + (res.events || []).length + ' 条　死亡 ' + (st.deaths || 0) +
+      '　进度 ' + (st.advancements || 0) + '　崩溃 ' + (st.crashes || 0));
+    lines.push('');
+    (res.events || []).forEach((e) => lines.push('[' + (e.time || '--:--:--') + '] ' + (e.text || '')));
+    return lines.join('\n');
+  }
+  function copyDiary() {
+    if (!diaryData || !diaryData.ok || diaryData.empty) { alert('还没有可复制的冒险日记'); return; }
+    const text = diaryText(diaryData);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text)
+        .then(() => alert('已复制冒险日记摘要'))
+        .catch(() => alert('复制失败，请手动选择文本'));
+    } else {
+      alert(text);
+    }
+  }
+
+  async function loadDiary(d) {
+    const box = el('vmDiary');
+    const cnt = el('vmDiaryCount');
+    if (!box) return;
+    box.innerHTML = '<div class="vm-mini-hint">加载中…</div>';
+    let res;
+    try {
+      res = await window.launcher.version.timeline(gameDir, d.id);
+    } catch (e) {
+      box.innerHTML = '<div class="vm-mini-hint">加载失败：' + esc(e && e.message ? e.message : '未知错误') + '</div>';
+      return;
+    }
+    if (!box.isConnected) return;
+    diaryData = res;
+    if (!res.ok) { box.innerHTML = '<div class="vm-mini-hint">读取失败：' + esc(res.error || '未知错误') + '</div>'; return; }
+    const st = res.stats || {};
+    if (cnt) cnt.textContent = (st.matched || 0) + ' 条事件';
+    if (res.empty) { box.innerHTML = '<div class="vm-mini-hint">' + esc(res.message || '没有可识别的事件') + '</div>'; return; }
+    const chips = [
+      diaryChip('总时长', st.durationSeconds == null ? '未知' : fmtDuration(st.durationSeconds)),
+      diaryChip('进入世界', st.worldOpens || 0),
+      diaryChip('死亡', st.deaths || 0),
+      diaryChip('进度', st.advancements || 0),
+      diaryChip('崩溃/OOM', st.crashes || 0),
+      diaryChip('联机加入', st.joins || 0),
+      diaryChip('维度', (st.dimensions || []).length),
+      diaryChip('日志行数', st.lines || 0),
+    ].join('');
+    const ss = res.sessions || [];
+    const last = ss.length ? ss[ss.length - 1] : null;
+    const evs = (last ? last.events : (res.events || [])).slice(-300);
+    const head = '<div class="vm-diary-title">' + esc(last
+      ? ('最近一局 · ' + last.world + (last.startTime ? '（' + last.startTime + ' 开始）' : ''))
+      : '事件流（未识别到进入/退出世界的分界）') + '</div>';
+    const src = '<p class="hint">来源：' + esc(res.source ? res.source.path : '—') +
+      (res.truncated ? '（日志较大，仅解析尾部）' : '') + '</p>';
+    box.innerHTML = '<div class="vm-diary-stats">' + chips + '</div>' + head +
+      '<div class="vm-diary-list">' + evs.map(diaryEventRow).join('') + '</div>' + src;
   }
 
   /* ---------------- 备份与恢复（#13） ---------------- */

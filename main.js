@@ -26,6 +26,8 @@ const instance = require('./src/instance');
 const modpack = require('./src/modpack');
 const javadl = require('./src/javadl');
 const zip = require('./src/zip');
+const worldguard = require('./src/worldguard');
+const timeline = require('./src/timeline');
 const modupdate = require('./src/modupdate');
 const { autoUpdater } = require('electron-updater');
 
@@ -596,9 +598,86 @@ ipcMain.handle('java:pick', async () => {
   return res.filePaths[0];
 });
 
+/** S2 / N3 守卫：把提示写进启动日志面板，不额外弹窗打断 */
+function guardLog(msg) {
+  try { if (win && !win.isDestroyed()) win.webContents.send('launch:log', msg); } catch (e) { /* ignore */ }
+}
+
+/**
+ * 启动前的跨版本开档守卫。
+ * 评估永远执行（纯只读，用于积累「上次成功打开版本」）；只有开启开关且检出 high 风险才弹窗。
+ * 任何异常 / 快照失败都只降级为提示，绝不阻塞启动（第六章硬边界）。
+ */
+async function guardBeforeLaunch(opts) {
+  let ev;
+  try {
+    ev = worldguard.evaluate(opts);
+  } catch (e) {
+    return { ok: true, degraded: e && e.message ? e.message : '评估异常' };
+  }
+  if (!ev.ok) {
+    guardLog('[存档守卫] 评估跳过：' + ev.error);
+    return { ok: true, warnings: [ev.error] };
+  }
+  if (!opts.enabled || !ev.risky.length) return { ok: true, evaluation: ev, warnings: [] };
+
+  const boxOpts = {
+    type: 'warning',
+    buttons: ['先做快照再启动', '复制存档副本再启动', '取消启动'],
+    defaultId: 0,
+    cancelId: 2,
+    title: '跨版本开档提醒',
+    message: '检测到 ' + ev.risky.length + ' 个存档的打开版本与上次不同',
+    detail: ev.risky.slice(0, 6).map((i) => '· ' + i.name + '：' + i.message).join('\n') +
+      (ev.risky.length > 6 ? '\n…另有 ' + (ev.risky.length - 6) + ' 个' : '') +
+      '\n\n建议先留一份可回退的副本，再启动游戏。',
+    checkboxLabel: '以后不再提醒（可在「设置 → 存档安全」重新开启）',
+    checkboxChecked: false,
+    noLink: true,
+  };
+  let choice;
+  try {
+    const parent = (win && !win.isDestroyed()) ? win : null;
+    choice = parent ? await dialog.showMessageBox(parent, boxOpts) : await dialog.showMessageBox(boxOpts);
+  } catch (e) {
+    guardLog('[存档守卫] 对话框异常，按无风险继续：' + (e && e.message ? e.message : ''));
+    return { ok: true, evaluation: ev, warnings: ['对话框异常，已跳过提醒'] };
+  }
+  if (choice.checkboxChecked) {
+    try { const c = readConfig(); c.worldGuard = false; writeConfig(c); } catch (e) { /* ignore */ }
+  }
+  if (choice.response === 2) {
+    guardLog('[存档守卫] 用户取消启动（跨版本风险）');
+    return { ok: false, cancelled: true, error: '已取消启动：检测到跨版本开档风险' };
+  }
+  const folders = ev.risky.map((i) => i.folder);
+  const action = choice.response === 0 ? 'snapshot' : 'copy';
+  let results;
+  try {
+    results = action === 'snapshot' ? worldguard.snapshot(ev.savesDir, folders) : worldguard.copy(ev.savesDir, folders);
+  } catch (e) {
+    return { ok: true, evaluation: ev, warnings: ['快照/复制执行异常：' + (e && e.message ? e.message : '')] };
+  }
+  const okCount = results.filter((r) => r.ok).length;
+  const warnings = results.filter((r) => !r.ok).map((r) => r.folder + '：' + r.error);
+  guardLog('[存档守卫] ' + (action === 'snapshot' ? '已创建快照' : '已复制升级前副本') +
+    ' ' + okCount + '/' + folders.length + ' 个' + (warnings.length ? '（有失败项，仅提示不阻止启动）' : ''));
+  return { ok: true, evaluation: ev, action, results, warnings };
+}
+
 ipcMain.handle('launch:start', async (event, cfg) => {
   if (launcher.running) return { ok: false, error: '已有 Minecraft 正在运行' };
   try {
+    const stored = readConfig();
+    // S2 / N3：跨版本开档守卫（评估只读；有风险时由用户决定快照 / 复制副本 / 取消）
+    const guard = await guardBeforeLaunch({
+      gameDir: stored.gameDir || cfg.gameDir,
+      versionId: cfg.versionId,
+      isolated: !!(stored.versionSettings && cfg.versionId && (stored.versionSettings[cfg.versionId] || {}).isolated),
+      enabled: stored.worldGuard !== false,
+    });
+    if (!guard.ok) return { ok: false, error: guard.error, cancelled: !!guard.cancelled };
+
     // 正版登录：先确保 mc token 有效（过期会自动用 refresh token 刷新）
     let account = null;
     if (cfg.authMode === 'msa') {
@@ -611,7 +690,6 @@ ipcMain.handle('launch:start', async (event, cfg) => {
     }
 
     // 合并「版本管理」页设置的每版本覆盖参数（留空则沿用全局）
-    const stored = readConfig();
     const vs = (stored.versionSettings && cfg.versionId && stored.versionSettings[cfg.versionId]) || {};
     const instanceDir = vs.isolated ? path.join(stored.gameDir || cfg.gameDir, 'instances', cfg.versionId) : null;
     // 内存解析：版本级覆盖 > 手动模式取配置 > 自动模式按物理内存算
@@ -635,6 +713,12 @@ ipcMain.handle('launch:start', async (event, cfg) => {
     });
     const res = launcher.start(prepared.command, prepared.args, prepared.cwd);
     if (!res.ok) return res;
+    // 启动成功后才记录状态：启动失败不应污染「上次成功打开的版本」判据
+    try {
+      if (guard && guard.evaluation && guard.evaluation.items && guard.evaluation.items.length) {
+        worldguard.record(guard.evaluation.statePath, guard.evaluation.items);
+      }
+    } catch (e) { /* 状态记录失败绝不影响已启动的游戏 */ }
     return {
       ok: true,
       pid: res.pid,
@@ -1312,6 +1396,18 @@ ipcMain.handle('world:info', (event, gameDir, versionId, folders) => {
     return { ok: true, savesDir: dir, items: list.map((f) => instance.worldInfo(dir, f)) };
   } catch (e) {
     return { ok: false, error: e.message, items: [] };
+  }
+});
+
+// ROADMAP S2 / N1：冒险日记（只读日志尾部，纯本地，不返回日志原文）
+ipcMain.handle('world:timeline', (event, gameDir, versionId) => {
+  try {
+    const cfg = readConfig();
+    const settings = cfg.versionSettings || {};
+    const isolated = !!(settings[versionId] && settings[versionId].isolated);
+    return timeline.readTimeline({ gameDir: gameDir || cfg.gameDir, versionId, isolated });
+  } catch (e) {
+    return { ok: false, error: e.message, events: [], sessions: [], sources: [] };
   }
 });
 
