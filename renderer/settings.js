@@ -186,7 +186,7 @@
       '<button class="danger" id="eggStop">立即关闭彩蛋</button></div>' +
       '<p class="hint">紧急关闭快捷键：Ctrl + Alt + E</p></section>' +
       '<section class="card"><h2><span class="h2num">4</span>自动更新</h2>' +
-      '<p class="hint">填 GitHub 仓库地址即可（如 https://github.com/wiuw3qde/minecraft-launcher），启动器会用 GitHub Releases 自动检查并下载更新。也可用任意静态网址（需含 latest.yml 和安装包）。</p>' +
+      '<p class="hint">填 GitHub 仓库地址即可（如 https://github.com/wiuw3qde/minecraft-launcher），启动器会用 GitHub Releases 自动检查并下载更新。也可用任意静态网址（Windows 需 latest.yml + .exe；macOS 需 latest-mac.yml + .zip）。</p>' +
       '<div class="field-row"><input type="url" class="grow" id="updaterUrl" placeholder="https://github.com/你的名/仓库 或 https://你的域名/MC启动器/" />' +
       '<button class="ghost" id="saveUpdaterUrl">保存</button></div>' +
       '<div class="row" style="margin-top:10px"><span class="hint">当前版本：<b id="curVersion">—</b></span>' +

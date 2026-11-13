@@ -32,11 +32,28 @@ function parseZip(file) {
     const extraLen = buf.readUInt16LE(p + 30);
     const commentLen = buf.readUInt16LE(p + 32);
     const localOffset = buf.readUInt32LE(p + 42);
+    // central directory 的 external attributes 高 16 位保存 Unix mode（S_IFMT + rwx）。
+    // JDK zip / Terracotta tar.gz 转出的可执行文件都靠这个标记，解压时不恢复会全部失去 +x。
+    const externalAttrs = buf.readUInt32LE(p + 38);
+    const unixMode = (externalAttrs >>> 16) & 0xffff;
     const name = buf.slice(p + 46, p + 46 + nameLen).toString('utf8').replace(/\\/g, '/');
-    entries.push({ name, method, compressedSize, uncompressedSize, localOffset });
+    entries.push({ name, method, compressedSize, uncompressedSize, localOffset, unixMode });
     p += 46 + nameLen + extraLen + commentLen;
   }
   return { buf, entries };
+}
+
+/**
+ * 恢复 zip 条目里的 Unix 可执行位。
+ * Windows 上 chmod 只影响只读属性、无实际意义，直接跳过；
+ * macOS/Linux 上 bin/java、.dylib、natives、Terracotta 二进制都必须有 +x 才能执行。
+ */
+function applyUnixMode(target, unixMode) {
+  if (process.platform === 'win32' || !unixMode) return;
+  if ((unixMode & 0o170000) !== 0o100000) return; // 仅常规文件
+  const perm = unixMode & 0o777;
+  if (!(perm & 0o111)) return;                    // 原本就不可执行
+  try { fs.chmodSync(target, perm); } catch (e) { /* 文件系统不支持则忽略 */ }
 }
 
 function readEntry(z, entry) {
@@ -78,6 +95,7 @@ function extractAll(zipFile, destDir, filter) {
       continue; // 单个条目损坏不影响其余文件
     }
     fs.writeFileSync(target, data);
+    applyUnixMode(target, entry.unixMode);
     written++;
   }
   return written;
@@ -119,9 +137,10 @@ function extractMapped(zipFile, destDir, mapFn) {
       continue;
     }
     fs.writeFileSync(target, data);
+    applyUnixMode(target, entry.unixMode);
     written++;
   }
   return written;
 }
 
-module.exports = { extractAll, extractMapped, listEntries, parseZip, readText };
+module.exports = { extractAll, extractMapped, listEntries, parseZip, readText, applyUnixMode };

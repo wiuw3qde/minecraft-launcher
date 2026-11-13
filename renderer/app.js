@@ -542,7 +542,9 @@ async function init() {
     window.Settings.applyAppearance(cfg);
     window.Settings.initEgg(cfg);
   }
-  $('envInfo').textContent = `${info.platform === 'win32' ? 'Windows' : info.platform} · ${info.arch} · 内存 ${info.totalMemoryMB} MB · v${info.version}`;
+  const osLabel = info.platform === 'win32' ? 'Windows'
+    : (info.platform === 'darwin' ? 'macOS' : (info.platform === 'linux' ? 'Linux' : info.platform));
+  $('envInfo').textContent = `${osLabel} · ${info.arch} · 内存 ${info.totalMemoryMB} MB · v${info.version}`;
 
   $('gameDir').value = cfg.gameDir || '';
   $('playerName').value = cfg.playerName || 'Player';

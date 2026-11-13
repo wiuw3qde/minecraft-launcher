@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
+const platform = require('./platform');
 
 function exists(file) {
   try {
@@ -71,52 +72,92 @@ function childrenOf(dir, depth, out) {
 
 function collectCandidateRoots() {
   const roots = [];
-  const pf = process.env['ProgramFiles'] || 'C:\\Program Files';
-  const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
   if (process.env.JAVA_HOME) roots.push(process.env.JAVA_HOME);
-  const parents = [
-    path.join(pf, 'Java'),
-    path.join(pf86, 'Java'),
-    path.join(pf, 'Eclipse Adoptium'),
-    path.join(pf, 'BellSoft'),
-    path.join(pf, 'Zulu'),
-    path.join(pf, 'Microsoft'),
-    path.join(pf, 'Amazon Corretto'),
-    path.join(pf, 'Semeru'),
-    path.join(pf, 'ojdkbuild'),
-    path.join(pf, 'GraalVM'),
-    path.join(pf, 'SapMachine'),
-    path.join(pf, 'AdoptOpenJDK'),
-    path.join(pf, 'dragonwell'),
-  ];
-  for (const p of parents) {
-    if (!fs.existsSync(p)) continue;
-    const subs = [];
-    childrenOf(p, 1, subs);
-    roots.push(p, ...subs);
+
+  if (platform.IS_WIN) {
+    // Windows 分支保持原样，不改动既有搜索行为。
+    const pf = process.env['ProgramFiles'] || 'C:\\Program Files';
+    const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+    const parents = [
+      path.join(pf, 'Java'),
+      path.join(pf86, 'Java'),
+      path.join(pf, 'Eclipse Adoptium'),
+      path.join(pf, 'BellSoft'),
+      path.join(pf, 'Zulu'),
+      path.join(pf, 'Microsoft'),
+      path.join(pf, 'Amazon Corretto'),
+      path.join(pf, 'Semeru'),
+      path.join(pf, 'ojdkbuild'),
+      path.join(pf, 'GraalVM'),
+      path.join(pf, 'SapMachine'),
+      path.join(pf, 'AdoptOpenJDK'),
+      path.join(pf, 'dragonwell'),
+    ];
+    for (const p of parents) {
+      if (!fs.existsSync(p)) continue;
+      const subs = [];
+      childrenOf(p, 1, subs);
+      roots.push(p, ...subs);
+    }
+  } else {
+    // macOS：/Library/Java/JavaVirtualMachines/<name>.jdk/Contents/Home/bin/java
+    // 以及 Homebrew 的 /opt/homebrew/opt/openjdk@XX（多为符号链接，childrenOf 不跟随）。
+    for (const p of platform.javaSearchRoots()) {
+      if (!fs.existsSync(p)) continue;
+      const subs = [];
+      childrenOf(p, 2, subs);
+      roots.push(p, ...subs);
+      for (const d of [p, ...subs]) {
+        const home = path.join(d, 'Contents', 'Home');
+        if (exists(path.join(home, 'bin', 'java'))) roots.push(home);
+      }
+      try {
+        for (const e of fs.readdirSync(p, { withFileTypes: true })) {
+          if (!e.isSymbolicLink() && !e.isDirectory()) continue;
+          const full = path.join(p, e.name);
+          if (exists(path.join(full, 'bin', 'java'))) roots.push(full);
+          const home = path.join(full, 'Contents', 'Home');
+          if (exists(path.join(home, 'bin', 'java'))) roots.push(home);
+        }
+      } catch (x) { /* 权限不足等，忽略 */ }
+    }
   }
+
   for (const r of extraRoots) {
     if (fs.existsSync(r)) {
       const subs = [];
       childrenOf(r, 2, subs);
       roots.push(r, ...subs);
+      if (!platform.IS_WIN) {
+        for (const d of subs) {
+          const home = path.join(d, 'Contents', 'Home');
+          if (exists(path.join(home, 'bin', 'java'))) roots.push(home);
+        }
+      }
     }
   }
   return Array.from(new Set(roots));
 }
 
 /** 游戏目录里可能自带官方运行时（runtime/java-runtime-xxx/...） */
-function collectBundledRuntimes(gameDir) {
+function collectBundledRuntimes(gameDir, plat) {
   const out = [];
   if (!gameDir) return out;
   const runtime = path.join(gameDir, 'runtime');
   if (!fs.existsSync(runtime)) return out;
   const subs = [];
   childrenOf(runtime, 4, subs);
+  // 新结构：<id>/windows-x64/<id>/bin/javaw.exe（mac 为 mac-os-x64/.../bin/java）；
+  // 旧结构：jre-x64/<ver>/bin/javaw.exe。目录名由平台决定，所以遍历所有子目录逐个试。
+  const isWin = (plat || process.platform) === 'win32';
+  const rels = isWin
+    ? [path.join('bin', 'javaw.exe')]
+    : [path.join('bin', 'java'), path.join('Contents', 'Home', 'bin', 'java')];
   for (const d of [runtime, ...subs]) {
-    // 新结构：<id>/windows-x64/<id>/bin/javaw.exe；旧结构：jre-x64/<ver>/bin/javaw.exe
-    const target = path.join(d, 'bin', process.platform === 'win32' ? 'javaw.exe' : 'java');
-    if (exists(target)) out.push(target);
+    for (const rel of rels) {
+      const target = path.join(d, rel);
+      if (exists(target)) { out.push(target); break; }
+    }
   }
   return Array.from(new Set(out));
 }
@@ -127,9 +168,12 @@ async function findJavaCandidates(gameDir, limit) {
 
   for (const r of collectBundledRuntimes(gameDir)) candidates.add(r);
 
+  const rels = platform.IS_WIN
+    ? [path.join('bin', 'javaw.exe'), path.join('bin', 'java.exe'), path.join('bin', 'java')]
+    : [path.join('bin', 'java'), path.join('Contents', 'Home', 'bin', 'java'), 'java'];
   for (const root of collectCandidateRoots()) {
-    for (const exe of ['javaw.exe', 'java.exe', 'java']) {
-      const p = path.join(root, 'bin', exe);
+    for (const rel of rels) {
+      const p = path.join(root, rel);
       if (exists(p)) candidates.add(p);
     }
   }

@@ -2,8 +2,9 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const platform = require('./src/platform');
 const { app, BrowserWindow, ipcMain, dialog, shell, session, clipboard } = require('electron');
-const { spawn, execFile } = require('child_process');
+const { spawn, execFile, execFileSync } = require('child_process');
 const https = require('https');
 const http = require('http');
 
@@ -226,11 +227,10 @@ app.whenReady().then(() => {
    * 这里把该分区的 UA 换成与内置 Chromium 版本一致的普通 Chrome UA（去掉 Electron 段）。 */
   const pmcSession = session.fromPartition('persist:pmc');
   const chromeVer = (process.versions && process.versions.chrome) || '130.0.0.0';
-  pmcSession.setUserAgent(
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' +
-      chromeVer +
-      ' Safari/537.36'
-  );
+  // UA 按真实平台生成（原先两处都写死 Windows，会在 macOS 上误报系统），
+  // Chrome 版本仍取当前 Electron 内置版本，Windows 下的 UA 与原来完全一致。
+  const chromeUa = platform.userAgent(undefined, undefined, chromeVer);
+  pmcSession.setUserAgent(chromeUa);
 
   // 地图页 webview（partition persist:pmc）的下载：自动存到下载文件夹并通知渲染进程
   pmcSession.on('will-download', (event, item) => {
@@ -247,11 +247,7 @@ app.whenReady().then(() => {
 
   // 陶瓦联机 webview 分区：同样用普通 Chrome UA（localhost 服务一般不在意 UA，但统一规避 Electron UA 潜在问题）
   const tcSession = session.fromPartition('persist:terracotta');
-  tcSession.setUserAgent(
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' +
-      chromeVer +
-      ' Safari/537.36'
-  );
+  tcSession.setUserAgent(chromeUa);
 
   migrateLegacyConfig();
   // 把启动器自管运行时目录加入 Java 搜索范围，下载安装后可直接被识别
@@ -427,7 +423,7 @@ ipcMain.handle('dir:default', () => scanner.defaultGameDir());
 
 ipcMain.handle('dir:pick', async (event, current) => {
   const res = await dialog.showOpenDialog(win, {
-    title: '选择 .minecraft 游戏目录',
+    title: '选择 ' + platform.gameDirName() + ' 游戏目录',
     defaultPath: current && fs.existsSync(current) ? current : scanner.defaultGameDir(),
     properties: ['openDirectory'],
   });
@@ -590,9 +586,10 @@ ipcMain.handle('java:download', async (event, opts) => {
 
 ipcMain.handle('java:pick', async () => {
   const res = await dialog.showOpenDialog(win, {
-    title: '选择 java.exe（推荐）或 javaw.exe',
+    title: platform.javaPickTitle(),
     properties: ['openFile'],
-    filters: [{ name: 'Java 可执行文件', extensions: ['exe'] }, { name: '全部文件', extensions: ['*'] }],
+    // macOS 的 java 没有扩展名，写死 ['exe'] 会让用户根本选不到文件
+    filters: platform.javaPickFilters().concat([{ name: '全部文件', extensions: ['*'] }]),
   });
   if (res.canceled || !res.filePaths.length) return null;
   return res.filePaths[0];
@@ -1950,8 +1947,12 @@ process.on('unhandledRejection', (e) => {
 });
 
 const TC_DIR = path.join(app.getPath('userData'), 'terracotta');
-const TC_ARCH = process.arch === 'arm64' ? 'windows-arm64' : 'windows-x86_64';
-const TC_FALLBACK = 'https://github.com/burningtnt/Terracotta/releases/download/v0.4.2/terracotta-0.4.2-windows-x86_64-pkg.tar.gz';
+const TC_VERSION = '0.4.2';
+// 官方 Release 资产名按平台区分：windows-x86_64 / macos-x86_64 / macos-arm64 …
+const TC_ARCH = platform.terracottaArch();
+const TC_FALLBACK = platform.terracottaFallback(TC_VERSION);
+// macOS 的 pkg 会安装 LaunchAgent 守护进程（TUN/路由需要特权），首次使用需手动安装一次。
+const TC_DAEMON_PLIST = '/Library/LaunchAgents/net.burningtnt.terracotta.daemon.plist';
 // 官方 HMCL 集成模式：启动时把随机监听端口写进此文件（{"port": N}），启动器据此嵌入 Web 界面
 const TC_HMCL_FILE = path.join(TC_DIR, 'hmcl-port.json');
 let tcProc = null;
@@ -1961,22 +1962,98 @@ function tcSend(channel, payload) {
   if (win && win.webContents && !win.webContents.isDestroyed()) win.webContents.send(channel, payload);
 }
 
+/** Windows 找 .exe；macOS/Linux 的包里主程序是「无扩展名」的 Mach-O / ELF。
+ *  官方 mac 包内容已核对：terracotta-<ver>-macos-x86_64（chmod 755）+ 同名 .pkg。 */
+function tcIsExeName(name) {
+  if (platform.IS_WIN) return /\.exe$/i.test(name);
+  if (/\.(pkg|app|dmg|zip|tar|gz|7z|json|lock|txt|md|yml|yaml|log|sh|dylib|so|a|plist|png|ico)$/i.test(name)) return false;
+  return true;
+}
+
+function tcExecutable(full) {
+  try {
+    if (!fs.statSync(full).isFile()) return false;
+    if (platform.IS_WIN) return true;
+    fs.accessSync(full, fs.constants.X_OK);
+    return true;
+  } catch (e) { return false; }
+}
+
 /** 在 TC_DIR 内递归查找 terracotta 可执行文件 */
 function findTcExe() {
   try {
     const stack = [TC_DIR];
+    let fallback = null;
     while (stack.length) {
       const cur = stack.pop();
       let items;
       try { items = fs.readdirSync(cur, { withFileTypes: true }); } catch (e) { continue; }
       for (const it of items) {
         const full = path.join(cur, it.name);
+        if (it.isDirectory()) {
+          // .app bundle（官方 .pkg 会装到 /Applications，这里兼容手工放到 TC_DIR 的情况）
+          if (!platform.IS_WIN && /\.app$/i.test(it.name)) {
+            const macDir = path.join(full, 'Contents', 'MacOS');
+            try {
+              for (const f of fs.readdirSync(macDir)) {
+                const p = path.join(macDir, f);
+                if (!/daemon$/i.test(f) && tcExecutable(p)) return p;
+              }
+            } catch (e) { /* ignore */ }
+          }
+          stack.push(full);
+          continue;
+        }
+        if (!tcIsExeName(it.name) || !tcExecutable(full)) continue;
+        if (/^terracotta/i.test(it.name)) return full; // 官方主二进制优先
+        if (!fallback) fallback = full;
+      }
+    }
+    return fallback;
+  } catch (e) { /* ignore */ }
+  return null;
+}
+
+/** macOS：tar 解压后确保可执行位，并清除从网络下载继承的隔离属性 */
+function prepareTcMac() {
+  if (!platform.IS_MAC) return;
+  try { execFileSync('chmod', ['-R', 'u+rwX', TC_DIR], { timeout: 15000 }); } catch (e) { /* ignore */ }
+  // Gatekeeper 会把 quarantine 传播到归档解压出的二进制；不清除会直接被系统拦下
+  try { execFileSync('xattr', ['-c', '-r', TC_DIR], { timeout: 15000 }); } catch (e) { /* 无该属性时返回非 0，忽略 */ }
+}
+
+/** 官方 mac 包里附带 .pkg：安装 LaunchAgent 守护进程，TUN/路由需要它 */
+function findTcPkg() {
+  if (!platform.IS_MAC) return null;
+  try {
+    const stack = [TC_DIR];
+    while (stack.length) {
+      const cur = stack.pop();
+      for (const it of fs.readdirSync(cur, { withFileTypes: true })) {
+        const full = path.join(cur, it.name);
         if (it.isDirectory()) { stack.push(full); continue; }
-        if (/\.exe$/i.test(it.name)) return full;
+        if (/\.pkg$/i.test(it.name)) return full;
       }
     }
   } catch (e) { /* ignore */ }
   return null;
+}
+
+function tcNeedsPrivilegedInstall(pkg) {
+  return !!(platform.IS_MAC && pkg && !fs.existsSync(TC_DAEMON_PLIST));
+}
+
+/** 停止旧进程：Windows 用 taskkill /T 连子进程一起杀；POSIX 用信号 */
+function stopTcProcess() {
+  if (!tcProc || !isRunning(tcProc.pid)) return;
+  const pid = tcProc.pid;
+  if (platform.IS_WIN) {
+    try { execFileSync('taskkill', ['/PID', String(pid), '/F', '/T']); } catch (e) { /* ignore */ }
+  } else {
+    try { process.kill(pid, 'SIGTERM'); } catch (e) { /* ignore */ }
+    const t = setTimeout(() => { try { process.kill(pid, 'SIGKILL'); } catch (x) { /* ignore */ } }, 1500);
+    if (t.unref) t.unref();
+  }
 }
 
 /** 检测 pid 是否存活（Windows 下 detached 进程） */
@@ -2075,13 +2152,30 @@ ipcMain.handle('terracotta:status', () => {
   const exe = findTcExe();
   const running = !!(tcProc && isRunning(tcProc.pid));
   if (running && !tcPort) tcPort = discoverTcPort();
+  const pkg = findTcPkg();
   return {
     installed: !!exe,
     running,
     exePath: exe,
     port: tcPort,
     webUrl: tcPort ? ('http://127.0.0.1:' + tcPort + '/') : null,
+    // macOS 首次使用需安装随包附带的 .pkg（LaunchAgent 守护进程）
+    pkgPath: pkg,
+    needsPrivilegedInstall: tcNeedsPrivilegedInstall(pkg),
+    platform: process.platform,
   };
+});
+
+/** 打开随包附带的 .pkg，交给 macOS 安装器（会提示管理员密码） */
+ipcMain.handle('terracotta:open-pkg', async () => {
+  const pkg = findTcPkg();
+  if (!pkg) return { ok: false, error: '未找到系统组件安装包（.pkg）' };
+  try {
+    const r = await shell.openPath(pkg);
+    return { ok: !r, error: r || null };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 });
 
 ipcMain.handle('terracotta:install', async (event, opts) => {
@@ -2102,7 +2196,7 @@ ipcMain.handle('terracotta:install', async (event, opts) => {
   const tmp = path.join(os.tmpdir(), 'terracotta-' + Date.now() + '.tar.gz');
   try {
     // 先停掉可能正在运行的旧进程，并清空目标目录，避免 bsdtar 因已存在对象失败
-    try { if (tcProc && isRunning(tcProc.pid)) execFileSync('taskkill', ['/PID', String(tcProc.pid), '/F', '/T']); } catch (e) { /* ignore */ }
+    stopTcProcess();
     tcProc = null; tcPort = null;
     try { fs.rmSync(TC_DIR, { recursive: true, force: true }); } catch (e) { /* ignore */ }
     fs.mkdirSync(TC_DIR, { recursive: true });
@@ -2111,6 +2205,7 @@ ipcMain.handle('terracotta:install', async (event, opts) => {
     });
     tcSend('terracotta:log', { taskId, text: '下载完成，正在解压…' });
     await tarExtract(tmp, TC_DIR);
+    prepareTcMac();
     try { fs.rmSync(tmp, { force: true }); } catch (e) { /* ignore */ }
     const exe = findTcExe();
     if (!exe) {
@@ -2137,6 +2232,11 @@ ipcMain.handle('terracotta:launch', async () => {
     // 以官方 HMCL 集成模式启动：把随机端口写入文件，启动器据此嵌入 Web 界面（通常不弹外部浏览器）
     try { fs.rmSync(TC_HMCL_FILE, { force: true }); } catch (e) { /* ignore */ }
     tcPort = null;
+    // 手工放置或 Gatekeeper 处理后可能丢失执行位，启动前补一次
+    if (!platform.IS_WIN) {
+      try { fs.chmodSync(exe, 0o755); } catch (e) { /* ignore */ }
+      try { execFileSync('xattr', ['-c', exe], { timeout: 5000 }); } catch (e) { /* ignore */ }
+    }
     const child = spawn(exe, ['--hmcl', TC_HMCL_FILE], { detached: true, stdio: 'ignore', cwd: TC_DIR, windowsHide: false });
     child.unref();
     tcProc = child;
@@ -2154,9 +2254,7 @@ ipcMain.handle('terracotta:launch', async () => {
 });
 
 ipcMain.handle('terracotta:stop', async () => {
-  if (tcProc && isRunning(tcProc.pid)) {
-    try { execFile('taskkill', ['/PID', String(tcProc.pid), '/F', '/T']); } catch (e) { /* ignore */ }
-  }
+  stopTcProcess();
   tcProc = null;
   tcPort = null;
   try { fs.rmSync(TC_HMCL_FILE, { force: true }); } catch (e) { /* ignore */ }

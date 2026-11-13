@@ -1,15 +1,17 @@
 'use strict';
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { readJsonFile } = require('./util');
+const platform = require('./platform');
 
 function defaultGameDir() {
-  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
   if (process.platform === 'win32') {
     const base = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
     return path.join(base, '.minecraft');
   }
-  if (process.platform === 'darwin') return path.join(home, 'Library', 'Application Support', 'minecraft');
+  if (process.platform === 'darwin') return path.join(home, 'Library', 'Application Support', platform.gameDirName('darwin'));
   return path.join(home, '.minecraft');
 }
 
@@ -33,6 +35,11 @@ function normalizeGameDir(dir) {
   if (looksLikeGameDir(dir)) return dir;
   const candidate = path.join(dir, '.minecraft');
   if (looksLikeGameDir(candidate)) return candidate;
+  if (platform.IS_MAC) {
+    // macOS 官方目录名没有前导点
+    const macCandidate = path.join(dir, platform.gameDirName('darwin'));
+    if (looksLikeGameDir(macCandidate)) return macCandidate;
+  }
   return dir;
 }
 

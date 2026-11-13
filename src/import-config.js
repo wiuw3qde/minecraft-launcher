@@ -3,8 +3,10 @@
  * 思路：通用别名解析，兼容 JSON（HMCL accounts.json / PCL2 配置）与 INI/key=value（HMCL hmclversion.cfg）。
  * 不迁移正版 token（无法导出），只迁移可复用的离线账号名 / Java 路径 / 内存 / 游戏版本。 */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const scanner = require('./scanner');
+const platform = require('./platform');
 
 // 规范字段 -> 别名（中英文 / 多种命名）
 const FIELD_ALIASES = {
@@ -138,6 +140,9 @@ function parseExternalConfig(filePath) {
         path.join(fields.javaPath, 'bin', 'javaw.exe'),
         path.join(fields.javaPath, 'bin', 'java.exe'),
         path.join(fields.javaPath, 'javaw.exe'),
+        // macOS / Linux：java 无扩展名，.jdk bundle 在 Contents/Home 下
+        path.join(fields.javaPath, 'bin', 'java'),
+        path.join(fields.javaPath, 'Contents', 'Home', 'bin', 'java'),
       ];
       const hit = cand.find((c) => fs.existsSync(c));
       if (hit) fields.javaPath = hit;
@@ -156,15 +161,19 @@ function parseExternalConfig(filePath) {
 /** 扫描本机常见位置的外部配置（HMCL / PCL2） */
 function scanExternalConfigs() {
   const found = [];
-  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
   const appdata = process.env.APPDATA || (home ? path.join(home, 'AppData', 'Roaming') : '');
 
   const mcRoots = [];
   if (appdata) mcRoots.push(path.join(appdata, '.minecraft'));
   if (home) mcRoots.push(path.join(home, '.minecraft'));
+  // macOS 官方目录无前导点，外部启动器配置在 ~/Library/Application Support 下
+  if (platform.IS_MAC) {
+    for (const r of platform.importConfigRoots('darwin', home)) mcRoots.push(r);
+  }
 
   const configFiles = [];
-  mcRoots.forEach((mc) => {
+  Array.from(new Set(mcRoots)).forEach((mc) => {
     if (!fs.existsSync(mc)) return;
     configFiles.push({ path: path.join(mc, 'hmclversion.cfg'), kind: 'HMCL 版本配置' });
     configFiles.push({ path: path.join(mc, 'accounts.json'), kind: 'HMCL 账号' });

@@ -186,12 +186,14 @@ function buildChangelog() {
   // （避免历史版本 exe 反复堆积在单个 Release 里，保持每个 Release 自包含）
   const assets = fs.readdirSync(distDir)
     .filter((f) => {
-      if (f === 'latest.yml') return true;
-      return /\.exe$/i.test(f) && f.includes(VERSION);
+      // Windows 与 macOS 共用同一个 Release：两份更新清单 + 各自的安装包都要在。
+      // darwin 下 electron-updater 强制读 latest-mac.yml，且 MacUpdater 只接受 .zip。
+      if (f === 'latest.yml' || f === 'latest-mac.yml') return true;
+      return /\.(exe|dmg|zip)$/i.test(f) && f.includes(VERSION);
     })
     .map((f) => path.join(distDir, f));
   if (!assets.length) {
-    console.error('[publish] dist/ 内没有可上传的 exe / latest.yml。');
+    console.error('[publish] dist/ 内没有可上传的产物（exe/dmg/zip）或更新清单（latest.yml / latest-mac.yml）。');
     process.exit(1);
   }
   console.log('[publish] 待上传资产：\n  ' + assets.map((a) => path.basename(a) + ' (' + (fs.statSync(a).size / 1048576).toFixed(1) + ' MB)').join('\n  '));

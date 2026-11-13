@@ -320,3 +320,64 @@
 | 大世界 / 老存档解析慢 | 只读 `level.dat` 单文件（通常几十 KB），不碰 region 文件；异步调用 |
 | 备份附带摘要增大体积 | 只存解析出的小 JSON（<1 KB），不存原始 level.dat |
 | 误判跨版本风险打扰玩家 | 首次只记录不拦截；有历史且确实变化时才提示；设置里可关闭 |
+
+---
+
+## 七、macOS（Intel x64）移植企划（2026-11-13 立项）
+
+### 7.1 目标与边界
+
+- **目标**：把现有版本移植到 macOS，**先只支持 Intel x64**；**原功能不动**（Windows 行为零回归）；自动更新能自动收到 Mac 版；联机在 Mac 上能真正跑起来。
+- **硬约束**：当前开发机是 Windows，`.dmg` 必须在 macOS 主机上构建（`hdiutil`），签名/公证需 Apple Developer 证书；本轮**不做云端 CI**。
+- **决定记录**（2026-11-13 用户确认）：
+  1. 构建方式 → **用户自备 Mac 本地构建**（我提供脚本 + 自检 + 步骤）；
+  2. 签名 → **无 Developer ID，先 ad-hoc 签名**（首次打开需右键→打开或 `xattr` 放行），预留正式签名开关；
+  3. 本轮范围 → **代码与配置全做完，但不打包、不发 Release**。
+
+### 7.2 调研结论（只读排查，已核对 electron-updater 源码与 Terracotta 官方构建脚本）
+
+**三个阻断级问题：**
+1. **自动更新会静默失效**：darwin 下 `getDefaultChannelName()` 固定 `latest-mac` → 只读 `latest-mac.yml`；`MacUpdater.findFile` 强制要求 `.zip`（只有 dmg 也不行）。原链路只产 `latest.yml` + `.exe`。
+2. **联机全链路写死 Windows**：资产名 `windows-x86_64`、可执行文件只找 `.exe`、杀进程用 `taskkill`、spawn 未处理可执行位/quarantine；且 macOS 需要 TUN 虚拟网卡授权。
+3. **Java 链路会让游戏起不来**：自动下载写死 Windows JDK、探测只扫 `Program Files`、zip 解压不恢复 Unix 可执行位（`bin/java` 没有 +x）。
+
+**已核实的关键事实（非猜测）：**
+- Terracotta 官方 v0.4.2 Release **确实有** `terracotta-0.4.2-macos-x86_64-pkg.tar.gz`（14.1 MB）。
+- 该包内容（据官方 `build.yaml` 第 313 行）：`terracotta-0.4.2-macos-x86_64`（裸 Mach-O，chmod 755）+ 同名 `.pkg`。
+- `.pkg` 的 `postinstall` 会写入 `/Library/LaunchAgents/net.burningtnt.terracotta.daemon.plist`，拉起 `/Applications/terracotta.app/Contents/MacOS/terracotta-daemon` —— **这是 TUN/路由权限的来源**，Mac 首次联机需用户装一次（管理员密码）。已做进联机页引导。
+- 原本就跨平台正确、不改：`window-all-closed`/`activate`、默认游戏目录、版本 JSON 的 `osx` 规则、日志/冒险日记路径。
+
+### 7.3 本轮实现（代码已完成，待 Mac 真机验证）
+
+| 层 | 改动 |
+| --- | --- |
+| 平台抽象 | 新增 `src/platform.js`：Java 候选/文件名、Adoptium OS 段、Terracotta 资产名与兜底直链、官方目录名、Mac 搜索根、UA、展示名。全部纯函数且可注入 `plat/arch`，**Windows 上也能单测 Mac 分支**。 |
+| 文件权限 | `src/zip.js` 解析 central directory 的 Unix external attrs 并恢复可执行位（Windows 下 no-op，不回归）。 |
+| Java | `src/javadl.js` 按平台取 JDK、找 `bin/java`；`src/java-finder.js` 扫 `/Library/Java/JavaVirtualMachines`、Homebrew、`.jdk/Contents/Home`；`src/launch-builder.js`/`import-config.js`/`scanner.js` 补 Mac 路径与 `minecraft`（无点）目录。 |
+| 联机 | `main.js`：资产名/兜底链接平台化；`findTcExe` 支持无扩展名 Mach-O 与 `.app`；`chmod` + `xattr -c` 去隔离；POSIX 信号替代 `taskkill`；`terracotta:status` 返回 `needsPrivilegedInstall`；新增 `terracotta:open-pkg`；联机页加「安装系统组件」引导条。 |
+| 其它 | `java:pick` 对话框不再只认 `.exe`；两处 webview UA + 微软登录 UA 按平台生成；环境信息显示 `macOS`；设置页更新源文案区分双清单。 |
+| 构建/发布 | `package.json` 增 `mac`(`dmg`+`zip`, x64, ASCII 产物名) 与 `mac:check`/`dist:mac` 脚本；新增 `scripts/build-mac.js`（独立 Mac 构建 + 手写 `latest-mac.yml`，**不改 Windows 的 build.js**）、`scripts/mac-preflight.js`（Mac 环境自检）；`scripts/publish.js` 支持上传 dmg/zip/`latest-mac.yml`，与 Windows 资产并存同一 Release。 |
+| 测试 | 新增 `tests/platform.test.js`、`tests/macbuild.test.js`（含 zip 校验、历史版本隔离、缺 zip 必须拒绝）；修 `tests/cancel.test.js` 的时序 flaky（原固定 sleep 30ms 会偶发 0 进度 → 掐断测试链）。`npm test` 真实退出码 0；preload/main IPC 100/100 对应。 |
+
+### 7.4 在 Mac 上的操作清单（跑完把终端输出贴回对话）
+
+```
+git pull                 # 取本轮提交
+npm install              # Intel Mac 会装 darwin-x64 版 Electron
+npm run mac:check        # 环境自检：架构/Xcode CLT/证书/Gatekeeper/图标/联机守护进程
+npm test                 # 在真实平台上跑一次全套回归
+npm run dist:mac         # 产出 dist/ 下 dmg + zip + latest-mac.yml
+```
+
+- **首次打开**（ad-hoc 签名、未公证）：右键 App →「打开」，或 `xattr -cr "/Applications/MC 启动器.app"`。
+- **首次联机**：启动器「联机」页 →「打开系统组件安装包」→ 输入管理员密码装 `.pkg`（LaunchAgent 守护进程）→ 重启启动器 →「启动联机」。
+- **发布时**（本轮不做）：同一 GitHub Release 需同时存在 `latest.yml` + Windows exe、`latest-mac.yml` + Mac dmg/zip；在 Mac 上跑 `node scripts/publish.js` 会补齐 Mac 资产且不动 Windows 资产。发布前**先 `git push origin main`**（否则 GitHub 自动创建的 tag 会指向旧提交，v0.2.3 踩过）。
+- **Apple Silicon**：本轮只出 x64 包，需 Rosetta 2；TUN 授权路径不同，暂不列为支持目标。
+
+### 7.5 待真机验证 / 已知风险
+
+1. **联机 TUN 权限**：`.pkg` 是否足以让 `--hmcl` 裸二进制正常建虚拟网卡，只能真机确认；若仍失败，改为优先启动 `/Applications/terracotta.app` 或引导用户授权系统扩展。
+2. **图标**：`mac.icon` 未显式设置，依赖 electron-builder 从 `assets/icon.png`（1024×1024）自动生成 `icon.icns`；需确认 Mac 上有 `iconutil`/Xcode CLT。
+3. **ad-hoc 签名 + 自动更新**：更新器替换 `.app` 后可能再次被 Gatekeeper 拦；正式签名/公证是根治办法。
+4. **未签名的第三方二进制**：Terracotta 解压物已做 `xattr -c`，但系统仍可能弹「允许来自未知开发者」。
+5. 本轮**未打包、未发 Release、版本号仍 0.2.3**；Windows 侧功能与发布流程保持原样。

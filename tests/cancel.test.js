@@ -115,8 +115,13 @@ function installFakeHttp(totalBytes, chunkBytes, intervalMs) {
         progressCount++;
       },
     });
-    // 让它先跑几块再取消
-    await new Promise((r) => setTimeout(r, 30));
+    // 等确实收到过至少一个进度回调再取消。
+    // 原先固定 sleep 30ms，事件循环被前面的网络测试占满时可能一块都来不及发，
+    // 导致 progressCount=0 的偶发失败（且会掐断整条 npm test && 链）。
+    const deadline = Date.now() + 3000;
+    while (progressCount === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
     cancel = true;
     const res = await p;
     const destroyed = fake.state.destroyed;

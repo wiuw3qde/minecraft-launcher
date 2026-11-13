@@ -57,7 +57,13 @@
       '<button class="primary" id="tcInstall">安装 / 更新</button>' +
       '<button class="primary" id="tcLaunch" hidden>启动联机</button>' +
       '<button class="ghost" id="tcStop" hidden>停止联机</button></div>' +
-      '<p class="hint" id="tcSvcTip"></p></section>' +
+      '<p class="hint" id="tcSvcTip"></p>' +
+      '<div class="callout-info" id="tcMacBox" hidden>' +
+      '<b>macOS 首次使用需安装系统组件</b>：陶瓦联机依赖后台守护进程创建虚拟网卡（TUN）。' +
+      '请点下方按钮打开随包附带的 <code>.pkg</code>，按系统提示输入管理员密码完成安装，再回来点「启动联机」。' +
+      '<div class="row" style="margin-top:8px"><button class="ghost small" id="tcOpenPkg">打开系统组件安装包</button>' +
+      '<span class="hint" id="tcOpenPkgMsg"></span></div></div>' +
+      '</section>' +
 
       '<section class="card tool-block"><h3>② 联机界面（已嵌入启动器）</h3>' +
       '<div class="tc-web-wrap" id="tcWebWrap">' +
@@ -99,6 +105,8 @@
     try { s = await window.launcher.terracotta.status(); } catch (e) { s = {}; }
     tcExePath = s.exePath || '';
     var webUrl = s.webUrl || null;
+    var macBox = $('tcMacBox');
+    if (macBox) macBox.hidden = !s.needsPrivilegedInstall;
     if (!s.installed) {
       badge.textContent = '未安装'; badge.className = 'status-badge bad';
       installBtn.hidden = false; launchBtn.hidden = true; stopBtn.hidden = true;
@@ -198,6 +206,20 @@
     var copyBtn = $('tcCopyCode');
     var web = $('tcWeb');
     var fail = $('tcWebFail');
+    var openPkgBtn = $('tcOpenPkg');
+
+    if (openPkgBtn) {
+      openPkgBtn.addEventListener('click', function () {
+        var msg = $('tcOpenPkgMsg');
+        window.launcher.terracotta.openPkg().then(function (r) {
+          if (msg) msg.textContent = r.ok
+            ? '已打开安装器，完成后回来点「启动联机」。'
+            : ('打开失败：' + (r.error || '未知错误'));
+        }).catch(function (e) {
+          if (msg) msg.textContent = '打开失败：' + e.message;
+        });
+      });
+    }
 
     // webview 加载失败兜底
     if (web && fail) {

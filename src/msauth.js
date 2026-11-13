@@ -10,6 +10,7 @@
  */
 const https = require('https');
 const { URL } = require('url');
+const platform = require('./platform');
 const { EventEmitter } = require('events');
 
 const MS_DEVICE_CODE = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode';
@@ -57,8 +58,8 @@ function request(urlString, { method = 'GET', form, json, headers = {}, timeout 
     // Minecraft 服务（api.minecraftservices.com）前面是 Akamai 类 WAF，
     // 不带 User-Agent 或 Node 默认 UA 经常直接 403。带一个正常 UA 才能通过。
     if (sendHeaders['User-Agent'] === undefined)
-      sendHeaders['User-Agent'] =
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+      // 按真实平台生成；Windows 下与原来的 Chrome/120 UA 完全一致
+      sendHeaders['User-Agent'] = platform.userAgent(undefined, undefined, '120.0.0.0');
 
     const req = https.request(
       {

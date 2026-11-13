@@ -10,6 +10,7 @@ const {
   OS,
 } = require('./version-profile');
 const { ensureNatives } = require('./natives');
+const platform = require('./platform');
 const { createOfflineAccount } = require('./offline-auth');
 const { gameDirOf } = require('./version-profile');
 
@@ -27,11 +28,19 @@ function applyTokens(str, tokens, unknownTokens) {
 function resolveJavaBin(javaPath) {
   if (!javaPath) throw new Error('未指定 Java 路径');
   let p = javaPath;
-  try {
-    const st = fs.statSync(p);
-    if (st.isDirectory()) p = path.join(p, 'bin', process.platform === 'win32' ? 'javaw.exe' : 'java');
-  } catch (e) {
-    throw new Error('Java 路径不存在：' + javaPath);
+  let st;
+  try { st = fs.statSync(p); } catch (e) { throw new Error('Java 路径不存在：' + javaPath); }
+  if (st.isDirectory()) {
+    if (platform.IS_WIN) {
+      // Windows 行为保持不变：目录一律补 bin/javaw.exe
+      p = path.join(p, 'bin', 'javaw.exe');
+    } else {
+      // macOS 的 .jdk bundle 可能是 <dir>/Contents/Home/bin/java
+      const rels = platform.javaRelCandidates();
+      const hit = rels.map((r) => path.join(javaPath, r)).find((c) => fs.existsSync(c));
+      if (!hit) throw new Error('Java 可执行文件不存在：' + path.join(javaPath, rels[0]));
+      p = hit;
+    }
   }
   if (!fs.existsSync(p)) throw new Error('Java 可执行文件不存在：' + p);
   return p;

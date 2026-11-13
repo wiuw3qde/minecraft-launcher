@@ -6,12 +6,14 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node tests/core.test.js && node tests/launch.test.js && node tests/msauth.test.js && node tests/loaders.test.js && node tests/optifine.test.js && node tests/modplatforms.test.js && node tests/cancel.test.js && node tests/maps-test.js && node tests/instance.test.js && node tests/modpack.test.js && node tests/modupdate.test.js && node tests/nbt.test.js && node tests/worldstate.test.js && node tests/eventrules.test.js && node tests/worldinfo.test.js && node tests/worldguard.test.js && node tests/timeline.test.js",
+    "test": "node tests/core.test.js && node tests/launch.test.js && node tests/msauth.test.js && node tests/loaders.test.js && node tests/optifine.test.js && node tests/modplatforms.test.js && node tests/cancel.test.js && node tests/maps-test.js && node tests/instance.test.js && node tests/modpack.test.js && node tests/modupdate.test.js && node tests/nbt.test.js && node tests/worldstate.test.js && node tests/eventrules.test.js && node tests/worldinfo.test.js && node tests/worldguard.test.js && node tests/timeline.test.js && node tests/platform.test.js && node tests/macbuild.test.js",
     "test-heavy": "node tests/download.test.js",
     "dist": "node scripts/build.js",
     "dist:dir": "node scripts/build.js --dir",
     "release": "node scripts/publish.js",
-    "ship": "node scripts/build.js && node scripts/publish.js"
+    "ship": "node scripts/build.js && node scripts/publish.js",
+    "mac:check": "node scripts/mac-preflight.js",
+    "dist:mac": "node scripts/build-mac.js"
   },
   "author": "mc-launcher",
   "license": "MIT",
@@ -52,6 +54,22 @@
     },
     "portable": {
       "artifactName": "MC启动器-${version}-便携版.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "arch": [
+        "x64"
+      ],
+      "artifactName": "MC-Launcher-${version}-${arch}.${ext}",
+      "category": "public.app-category.games",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "artifactName": "MC-Launcher-${version}-${arch}.${ext}"
     }
   },
   "publish": [

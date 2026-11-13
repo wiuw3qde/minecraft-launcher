@@ -66,6 +66,7 @@ const api = {
     install: (opts) => ipcRenderer.invoke('terracotta:install', opts),
     launch: () => ipcRenderer.invoke('terracotta:launch'),
     stop: () => ipcRenderer.invoke('terracotta:stop'),
+    openPkg: () => ipcRenderer.invoke('terracotta:open-pkg'),
     api: (p) => ipcRenderer.invoke('terracotta:api', p),
     onProgress: (cb) => ipcRenderer.on('terracotta:progress', (e, p) => cb(p)),
     onLog: (cb) => ipcRenderer.on('terracotta:log', (e, p) => cb(p)),
