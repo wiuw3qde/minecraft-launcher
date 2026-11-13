@@ -1,6 +1,6 @@
 # macOS（Intel x64）真机验收操作手册
 
-> 适用版本：v0.2.3 + 提交 `f9f75fb`（Mac 移植第一批）
+> 适用版本：v0.2.3 + Mac 移植第一批（提交 `f9f75fb` 及之后）
 > 更新日期：2026-11-13
 > **本轮约定：只在 Mac 本地构建与验证，不打包上传、不发 Release、不改版本号。**
 
@@ -8,7 +8,7 @@
 
 ## 0. 你现在到底要干什么（三句话）
 
-1. Windows 这边的 Mac 移植代码**已全部写完并推送到 GitHub**（`main` = `f9f75fb`），我这边没有待办了。
+1. Windows 这边的 Mac 移植代码**已全部写完并推送到 GitHub**（`main` 已包含 `f9f75fb`，之后可能还有文档提交），我这边没有待办了。
 2. 剩下唯一必须靠 Mac 才能做的事：**在 Intel Mac 上装环境 → 拉代码 → 跑自检/回归/构建 → 真机验收首次打开、自动更新、陶瓦联机**。
 3. 跑完把本文第 12 节列的输出整段贴回对话，我据此修第二轮（主要是联机 TUN 与 ad-hoc 签名的真机问题）。
 
@@ -102,11 +102,11 @@ npm -v
 cd ~/Documents
 git clone https://github.com/wiuw3qde/minecraft-launcher.git
 cd minecraft-launcher
-git log --oneline -3
+git log --oneline -5
 ```
 
-最后一条**必须**看到第一行是 `f9f75fb feat(macos): Intel x64 移植企划第一批...`。
-如果只看到 `098e4ca`，说明拉的是旧提交，执行 `git pull origin main` 再确认。
+输出里**必须能看到** `feat(macos): Intel x64 移植企划第一批` 这一行（最新一行可能是之后追加的文档提交，属正常）。
+如果最新只到 `098e4ca`，说明拉的是旧提交，执行 `git pull origin main` 再确认。
 
 ### 方式 B：完全离线（GitHub 连不上时用）
 
@@ -365,7 +365,7 @@ node -p "process.platform + '/' + process.arch"   # darwin/x64
 
 # 2) 代码
 cd ~/Documents && git clone https://github.com/wiuw3qde/minecraft-launcher.git && cd minecraft-launcher
-git log --oneline -1                      # 必须是 f9f75fb
+git log --oneline -5                      # 必须能看到 feat(macos) 那一行
 
 # 3) 依赖
 export npm_config_registry=https://registry.npmmirror.com
