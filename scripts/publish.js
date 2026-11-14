@@ -35,11 +35,10 @@ for (let i = 0; i < args.length; i++) {
 }
 const DEFAULT_REPO = 'wiuw3qde/minecraft-launcher';
 const repo = repoOverride || process.env.GH_REPO || DEFAULT_REPO;
-const [OWNER, REPO_NAME] = repo.split('/');
-if (!OWNER || !REPO_NAME) {
-  console.error('[publish] 仓库格式应为 owner/name，当前：' + repo);
-  process.exit(1);
-}
+// 这些值在 main() 里才初始化：本文件也会被单测 require，顶层不能 process.exit。
+let OWNER = '';
+let REPO_NAME = '';
+let TOKEN = '';
 
 // ---------- 令牌 ----------
 function loadToken() {
@@ -47,11 +46,6 @@ function loadToken() {
   const f = path.join(ROOT, '.github_token');
   if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8').trim();
   return '';
-}
-const TOKEN = loadToken();
-if (!TOKEN) {
-  console.error('[publish] 未找到 GitHub 令牌：请设置环境变量 GH_TOKEN，或在项目根目录放一个 .github_token 文件（已被 gitignore 忽略）。');
-  process.exit(1);
 }
 
 /**
@@ -66,11 +60,75 @@ function asciiName(f) {
     .replace(/[^\x20-\x7E]/g, '');
 }
 
+/**
+ * 读取更新清单里的 version 字段（latest.yml / latest-mac.yml 均为 YAML 单行）。
+ * 读不到返回空串，由调用方判定为不一致。
+ */
+function readYmlVersion(file) {
+  try {
+    const text = fs.readFileSync(file, 'utf8');
+    const m = text.match(/^\s*version:\s*['"]?([^\s'"]+)['"]?\s*$/m);
+    return m ? m[1] : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * 双平台发布前的资产一致性校验（纯函数，Windows 上也能单测 Mac 场景）。
+ *
+ * 存在的真实风险：dist/ 里常残留上一版的 latest.yml / latest-mac.yml，而资产筛选里
+ * 两个清单是「无条件上传」的。若 Mac 端用 0.2.3 的清单去补 0.2.4 的 Release，
+ * 会把旧清单覆盖上去 → 对应平台要么收不到更新、要么反复提示更新。
+ * 分两次发布（Windows 先、Mac 后）时每侧只有自己那一半，不能要求两侧资产齐全，
+ * 因此按「本次实际存在的清单/包」分组校验。
+ *
+ * @returns {{ok:boolean, errors:string[], win:string[], mac:string[]}}
+ */
+function validateReleaseAssets(distDir, version) {
+  const errors = [];
+  let names = [];
+  try {
+    names = fs.readdirSync(distDir);
+  } catch (e) {
+    return { ok: false, errors: ['读取产物目录失败：' + e.message], win: [], mac: [] };
+  }
+  const ofVersion = (f) => asciiName(f).includes(version);
+  const win = names.filter((f) => /\.exe$/i.test(f) && ofVersion(f));
+  const macZip = names.filter((f) => /\.zip$/i.test(f) && ofVersion(f));
+  const macDmg = names.filter((f) => /\.dmg$/i.test(f) && ofVersion(f));
+  const mac = macZip.concat(macDmg);
+  const hasWinYml = names.indexOf('latest.yml') >= 0;
+  const hasMacYml = names.indexOf('latest-mac.yml') >= 0;
+
+  if (hasWinYml) {
+    const v = readYmlVersion(path.join(distDir, 'latest.yml'));
+    if (v !== version) {
+      errors.push('latest.yml 的版本是 ' + (v || '未知') + '，与本次发布 ' + version + ' 不一致（请先重新打包，别上传旧清单）');
+    }
+    if (!win.length) errors.push('存在 latest.yml，但缺少 ' + version + ' 的 Windows .exe');
+  } else if (win.length) {
+    errors.push('存在 ' + version + ' 的 Windows 安装包，但缺少 latest.yml（Windows 端会收不到更新）');
+  }
+
+  if (hasMacYml) {
+    const v = readYmlVersion(path.join(distDir, 'latest-mac.yml'));
+    if (v !== version) {
+      errors.push('latest-mac.yml 的版本是 ' + (v || '未知') + '，与本次发布 ' + version + ' 不一致（Mac 端请用 ' + version + ' 重新跑 npm run dist:mac）');
+    }
+    if (!macZip.length) errors.push('存在 latest-mac.yml，但缺少 ' + version + ' 的 .zip（MacUpdater 只接受 zip）');
+  } else if (mac.length) {
+    errors.push('存在 ' + version + ' 的 Mac 安装包，但缺少 latest-mac.yml（Mac 端会收不到更新）');
+  }
+
+  if (!win.length && !mac.length) errors.push('dist/ 内没有 ' + version + ' 的任何安装包');
+  return { ok: errors.length === 0, errors, win, mac };
+}
+
 // ---------- 版本 ----------
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const VERSION = pkg.version;
 const TAG = 'v' + VERSION;
-console.log('[publish] 仓库', repo, '版本', TAG);
 
 // ---------- GitHub API 封装 ----------
 function gh(method, p, body) {
@@ -176,10 +234,30 @@ function buildChangelog() {
 }
 
 // ---------- 主流程 ----------
-(async () => {
+async function main() {
+  [OWNER, REPO_NAME] = repo.split('/');
+  if (!OWNER || !REPO_NAME) {
+    console.error('[publish] 仓库格式应为 owner/name，当前：' + repo);
+    process.exit(1);
+  }
+  TOKEN = loadToken();
+  if (!TOKEN) {
+    console.error('[publish] 未找到 GitHub 令牌：请设置环境变量 GH_TOKEN，或在项目根目录放一个 .github_token 文件（已被 gitignore 忽略）。');
+    process.exit(1);
+  }
+  console.log('[publish] 仓库', repo, '版本', TAG);
+
   const distDir = DIST_DIR;
   if (!fs.existsSync(distDir)) {
     console.error('[publish] 找不到 dist/ 目录，请先运行 npm run dist 打包。');
+    process.exit(1);
+  }
+  // 双平台发布前先校验：旧版清单绝不能被上传到新版 Release。
+  const check = validateReleaseAssets(distDir, VERSION);
+  console.log('[publish] 资产校验：' + VERSION + ' · Windows 包 ' + check.win.length + ' 个 · Mac 包 ' + check.mac.length + ' 个'
+    + (check.ok ? ' ✓' : ' ✗'));
+  if (!check.ok) {
+    check.errors.forEach((e) => console.error('[publish] ✗ ' + e));
     process.exit(1);
   }
   // 待上传资产：latest.yml + 仅当前版本的安装包与便携版
@@ -234,7 +312,12 @@ function buildChangelog() {
   console.log('\n[publish] ✅ 发布完成：');
   console.log('  Release: https://github.com/' + OWNER + '/' + REPO_NAME + '/releases/tag/' + TAG);
   console.log('  启动器设置页「自动更新」地址应填：https://github.com/' + OWNER + '/' + REPO_NAME);
-})().catch((e) => {
-  console.error('[publish] ❌ 失败：', e.message);
-  process.exit(1);
-});
+}
+
+if (require.main === module) {
+  main().catch((e) => {
+    console.error('[publish] ❌ 失败：', e.message);
+    process.exit(1);
+  });
+}
+module.exports = { readYmlVersion, validateReleaseAssets, asciiName };
