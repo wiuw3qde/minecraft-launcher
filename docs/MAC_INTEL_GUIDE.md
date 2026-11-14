@@ -1,8 +1,24 @@
 # macOS（Intel x64）真机验收操作手册
 
-> 适用版本：v0.2.3 + Mac 移植第一批（提交 `f9f75fb` 及之后）
-> 更新日期：2026-11-13
-> **本轮约定：只在 Mac 本地构建与验证，不打包上传、不发 Release、不改版本号。**
+> 适用版本：v0.2.4（Mac 移植第一批 + 双平台发布）
+> 更新日期：2026-11-14
+> 本手册写于 0.2.3 验收阶段，命令与流程仍然有效；进入 0.2.4 发布后**先读下面这一节**。
+
+---
+
+## 📌 v0.2.4 发布前必读（2026-11-14 更新）
+
+1. **必须先 `git pull`**：已修复 `build.mac.arch` 这个 electron-builder 非法配置 —— 它会让 **Windows 和 macOS 的打包都在配置校验阶段直接失败**（Mac 端如果之前 `npm run dist:mac` 报错，就是这个原因）。修复已推送，不 pull 就拿不到。
+2. **版本已改为 `0.2.4`**，且新增了 `releases/v0.2.4.md` 与发布资产一致性校验。
+3. **必须用 0.2.4 重新构建一次**：0.2.3 阶段产出的 `dmg` / `zip` / `latest-mac.yml` 是 0.2.3 的，不能拿来发 0.2.4 —— 清单版本不符会被发布脚本直接拦下；就算强行改名，App 内部版本号仍是 0.2.3，用户会反复收到同一个更新提示。
+
+```bash
+cd ~/Documents/minecraft-launcher
+git pull
+node -p "require('./package.json').version"      # 必须是 0.2.4
+npm run dist:mac
+head -3 dist/latest-mac.yml                     # 第一行必须是 version: 0.2.4
+```
 
 ---
 
@@ -208,8 +224,8 @@ npm run dist:mac
 首次构建会下载 dmg 相关工具，可能要几分钟。成功后 `dist/` 下应多出三样：
 
 ```
-MC-Launcher-0.2.3-x64.dmg      用户安装用
-MC-Launcher-0.2.3-x64.zip      自动更新必需（MacUpdater 只接受 zip，只有 dmg 会更新失败）
+MC-Launcher-0.2.4-x64.dmg      用户安装用
+MC-Launcher-0.2.4-x64.zip      自动更新必需（MacUpdater 只接受 zip，只有 dmg 会更新失败）
 latest-mac.yml                 Mac 端更新清单
 ```
 
@@ -222,7 +238,7 @@ cat dist/latest-mac.yml
 要求：`path:` 指向 `.zip`；`files:` 里的 `url` 是纯 ASCII 文件名；`sha512`/`size` 与 zip 实际一致。
 
 **注意：**
-- 本脚本**不会**改 `package.json` 版本号，仍是 `0.2.3`。
+- 本脚本**不会**改 `package.json` 版本号（发布前统一手动设定，当前 `0.2.4`）。
 - 它**不碰** Windows 的 `scripts/build.js`，Windows 打包链路零改动。
 - 无 Developer ID 时 electron-builder 自动做 ad-hoc 签名，这是本轮约定。
 - 若报 `hdiutil` / `iconutil` 错误，多半是第 2.1 步没装好；把完整构建日志贴回。
@@ -237,7 +253,7 @@ cat dist/latest-mac.yml
 npm start
 ```
 
-再验证安装包：打开 `dist/MC-Launcher-0.2.3-x64.dmg` → 把 App 拖进「应用程序」。
+再验证安装包：打开 `dist/MC-Launcher-0.2.4-x64.dmg` → 把 App 拖进「应用程序」。
 
 首次打开若被 Gatekeeper 拦（"无法打开，因为来自身份不明的开发者" / "已损坏"）：
 
@@ -316,7 +332,7 @@ log show --last 5m --predicate 'process CONTAINS[c] "terracotta"' 2>/dev/null | 
 - 将来真正发版时，**同一个 GitHub Release 必须同时有**：`latest.yml` + Windows `.exe`（含便携版）、`latest-mac.yml` + Mac `.dmg` + `.zip`；缺任何一样，对应平台就收不到更新。
 - 在 Mac 上跑 `node scripts/publish.js` 只会补齐 Mac 资产、不会动 Windows 资产（脚本按资产名跳过已存在的）。它需要 `.github_token`（该文件在 `.gitignore` 里，不会随仓库过去），需要时我给你或你本地放一份。
 - **发布前一定先 `git push origin main`**，否则 GitHub 自动建的 tag 会指向旧提交（v0.2.3 踩过这个坑）。
-- 版本号规则仍是 `0.X.9 → 0.(X+1).0`，当前 `0.2.3` 不动。
+- 版本号规则仍是 `0.X.9 → 0.(X+1).0`，本次发布版本为 `0.2.4`。
 
 ---
 
@@ -346,7 +362,7 @@ cd ~/Documents/minecraft-launcher
 ## 13. 现在不要做的 5 件事
 
 1. ❌ 不要跑 `npm run ship` / `npm run release` / `npm run dist`（后两个是 Windows 链路）。
-2. ❌ 不要改 `package.json` 的版本号（保持 `0.2.3`）。
+2. ❌ 不要改 `package.json` 的版本号（发布统一用 `0.2.4`）。
 3. ❌ 不要改 `scripts/build.js`、Windows 的 `latest.yml` 或任何 Windows 打包配置（「原功能不动」）。
 4. ❌ 不要手动编辑 `dist/latest-mac.yml`（哈希必须脚本算）。
 5. ❌ 不要把 `dist/`、`node_modules/` 提交到 git（已在 `.gitignore`）。

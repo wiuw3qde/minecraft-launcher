@@ -29,6 +29,7 @@ const UPLOAD_API = 'https://uploads.github.com';
 
 // ---------- 参数 / 配置 ----------
 const args = process.argv.slice(2);
+const dryRun = args.indexOf('--dry-run') >= 0;
 let repoOverride = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--repo' && args[i + 1]) repoOverride = args[++i];
@@ -275,6 +276,17 @@ async function main() {
     process.exit(1);
   }
   console.log('[publish] 待上传资产：\n  ' + assets.map((a) => path.basename(a) + ' (' + (fs.statSync(a).size / 1048576).toFixed(1) + ' MB)').join('\n  '));
+
+  if (dryRun) {
+    const notesPath = path.join(ROOT, 'releases', TAG + '.md');
+    console.log('\n[publish] --dry-run 预览（不联网、不创建/修改 Release）');
+    console.log('[publish] 正文来源：' + (fs.existsSync(notesPath) ? 'releases/' + TAG + '.md（手写正式说明）' : 'git log 自动生成'));
+    console.log('[publish] 正文前 12 行：');
+    console.log(buildChangelog().split('\n').slice(0, 12).map((l) => '  | ' + l).join('\n'));
+    console.log('[publish] 目标：https://github.com/' + OWNER + '/' + REPO_NAME + '/releases/tag/' + TAG);
+    console.log('[publish] 去掉 --dry-run 即真正发布；若 Release 已存在则只补缺失资产。');
+    return;
+  }
 
   // 1) 查找或创建 Release
   let release;
